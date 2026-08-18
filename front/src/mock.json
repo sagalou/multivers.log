@@ -1,0 +1,31 @@
+{
+  "documents": [
+    { "id": "doc_a1b2c3d4", "filename": "facture_janvier.pdf", "status": "processed", "error_message": null },
+    { "id": "doc_e5f6g7h8", "filename": "releve_mesures.csv", "status": "processed", "error_message": null },
+    { "id": "doc_i9j0k1l2", "filename": "notes_terrain.txt", "status": "processing", "error_message": null },
+    { "id": "doc_m3n4o5p6", "filename": "capture_plan.png", "status": "error", "error_message": "Image illisible, aucun texte detecte" }
+  ],
+  "ask": {
+    "answer": "Le montant total facture est de 4 200 euros HT. Il apparait dans la facture de janvier, et le releve de mesures confirme la meme somme en ligne 14.",
+    "citations": [
+      {
+        "chunk_id": "c_042",
+        "doc_id": "facture_janvier.pdf",
+        "page": 7,
+        "char_start": 1580,
+        "char_end": 1745,
+        "quote": "4 200 euros HT",
+        "bbox": null
+      },
+      {
+        "chunk_id": "c_118",
+        "doc_id": "releve_mesures.csv",
+        "page": null,
+        "char_start": 320,
+        "char_end": 361,
+        "quote": "total;4200;EUR;HT",
+        "bbox": null
+      }
+    ]
+  }
+}
