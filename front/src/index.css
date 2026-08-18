@@ -1,0 +1,34 @@
+:root {
+  --fond: #f5f6f8;
+  --carte: #ffffff;
+  --bordure: #dfe3e8;
+  --texte: #1c2128;
+  --texte-doux: #6b7280;
+  --accent: #2f5bea;
+  --vert: #0f7b46;
+  --orange: #a35b00;
+  --rouge: #b3261e;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--fond);
+  color: var(--texte);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+h1,
+h2 {
+  margin: 0;
+}
+
+button,
+input {
+  font: inherit;
+}

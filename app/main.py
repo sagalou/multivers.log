@@ -17,7 +17,7 @@ from app import db, extraction
 load_dotenv()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "./data/uploads")
 
 if GEMINI_API_KEY:
