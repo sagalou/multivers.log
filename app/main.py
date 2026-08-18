@@ -94,11 +94,24 @@ async def ask_question(payload: dict):
         }
 
     # Appel réel au LLM (palier 4 : brancher db.search_chunks() pour le contexte).
-    model = genai.GenerativeModel(GEMINI_MODEL)
-    response = model.generate_content(question)
+    try:
+        model = genai.GenerativeModel(GEMINI_MODEL)
+        response = model.generate_content(question)
+        answer_text = response.text
+    except Exception as exc:
+        # Clé refusée, quota épuisé, réseau coupé pendant la démo, etc. :
+        # on ne laisse jamais remonter une 500 brute, on retombe sur le
+        # même format no_answer que pour une question vide ou une clé
+        # manquante, cohérent pour le front.
+        return {
+            "answer": None,
+            "citations": [],
+            "no_answer": True,
+            "message": f"Erreur lors de l'appel au LLM : {exc}",
+        }
 
     return {
-        "answer": response.text,
+        "answer": answer_text,
         "citations": [],  # les vraies citations arrivent au palier 4, avec search_chunks()
     }
 
