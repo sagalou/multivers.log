@@ -1,17 +1,26 @@
 """
 Multivers.log — Back FastAPI
-Palier 2 (Socle) : squelette des endpoints, conforme à API_CONTRACT.md.
-La logique réelle (extraction, FTS5, appel LLM) sera branchée aux paliers 3 et 4.
+Palier 3 : schéma SQLite + FTS5 branché (documents, chunks).
+L'extraction réelle (PDF/CSV/notes/OCR) reste à brancher ensuite dans /upload.
 """
 
 import os
 import uuid
 
+import google.generativeai as genai
 from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 
+from app import db
+
 load_dotenv()
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 app = FastAPI(title="Multivers.log API")
 
@@ -23,8 +32,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Stockage en mémoire pour le squelette (remplacé par SQLite au palier 3)
-_documents_store: dict[str, dict] = {}
+
+@app.on_event("startup")
+def on_startup():
+    """Crée les tables SQLite si besoin, au démarrage du serveur."""
+    db.init_db()
 
 
 @app.get("/health")
@@ -36,35 +48,32 @@ def health():
 @app.post("/upload")
 async def upload_documents(files: list[UploadFile] = File(...)):
     """
-    Reçoit un ou plusieurs documents.
-    TODO palier 3 : brancher le pipeline d'ingestion réel
-    (détection type -> extraction -> OCR si capture -> chunks -> SQLite).
+    Reçoit un ou plusieurs documents, les enregistre en base (statut "processing").
+    TODO palier 3 (suite) : brancher l'extraction réelle
+    (détection type -> extraction -> OCR si capture -> chunks -> insert_chunk()),
+    puis passer le statut à "processed" ou "error".
     """
     results = []
     for f in files:
         doc_id = f"doc_{uuid.uuid4().hex[:8]}"
-        _documents_store[doc_id] = {
-            "id": doc_id,
-            "filename": f.filename,
-            "status": "processing",  # deviendra "processed" ou "error" une fois le pipeline branché
-        }
-        results.append(_documents_store[doc_id])
+        file_type = (f.filename.rsplit(".", 1)[-1] if "." in f.filename else "unknown").lower()
+        doc = db.insert_document(doc_id, f.filename, file_type, status="processing")
+        results.append(doc)
     return {"documents": results}
 
 
 @app.get("/documents")
 def list_documents():
     """Liste les documents et leur statut, pour la vue liste du front."""
-    return {"documents": list(_documents_store.values())}
+    return {"documents": db.list_documents()}
 
 
 @app.post("/ask")
 async def ask_question(payload: dict):
     """
     Reçoit une question en langage naturel.
-    TODO palier 4 : brancher search() (FTS5) + appel LLM + vérification citation.
-    Réponse au format exact du contrat API_CONTRACT.md, avec des valeurs
-    factices pour l'instant afin que le front puisse déjà s'y brancher.
+    Palier 3 : toujours pas de recherche branchée dans la boucle de réponse
+    (le contexte issu du corpus arrive au palier 4, via db.search_chunks()).
     """
     question = payload.get("question", "")
 
@@ -76,19 +85,21 @@ async def ask_question(payload: dict):
             "message": "Question vide.",
         }
 
-    # Réponse factice conforme au contrat, à remplacer par la vraie boucle agent.
+    if not GEMINI_API_KEY:
+        return {
+            "answer": None,
+            "citations": [],
+            "no_answer": True,
+            "message": "GEMINI_API_KEY manquante côté serveur (voir .env).",
+        }
+
+    # Appel réel au LLM (palier 4 : brancher db.search_chunks() pour le contexte).
+    model = genai.GenerativeModel(GEMINI_MODEL)
+    response = model.generate_content(question)
+
     return {
-        "answer": "Réponse factice en attendant le branchement de l'agent (palier 4).",
-        "citations": [
-            {
-                "chunk_id": "c_demo",
-                "doc_id": "exemple.pdf",
-                "page": 1,
-                "char_start": 0,
-                "char_end": 42,
-                "quote": "Passage exemple pour tester le front",
-            }
-        ],
+        "answer": response.text,
+        "citations": [],  # les vraies citations arrivent au palier 4, avec search_chunks()
     }
 
 
@@ -100,5 +111,5 @@ async def generate_report(payload: dict):
     """
     return {
         "report": "Rapport factice en attendant l'implémentation.",
-        "sources": list(_documents_store.keys()),
+        "sources": [doc["id"] for doc in db.list_documents()],
     }
