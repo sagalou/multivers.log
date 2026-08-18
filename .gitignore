@@ -1,0 +1,40 @@
+# Environnement / secrets
+.env
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.Python
+build/
+dist/
+
+# Base de données locale
+*.db
+*.sqlite
+*.sqlite3
+
+# Documents uploadés par les utilisateurs (données locales, pas à versionner)
+uploads/
+data/
+
+# Front (si Node/React)
+node_modules/
+dist/
+.vite/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
