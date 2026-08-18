@@ -5,16 +5,25 @@ vient ensuite, elle appellera insert_chunk() pour chaque passage extrait.
 """
 
 import os
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
-DATABASE_PATH = os.getenv("DATABASE_PATH", "./data/multivers.db")
+
+def _database_path() -> str:
+    """
+    Lecture différée (pas au chargement du module) pour ne pas dépendre
+    de l'ordre entre load_dotenv() et l'import de ce module : si ce module
+    est importé avant que le .env soit chargé, une valeur lue une seule
+    fois à l'import figerait le défaut et ignorerait le .env pour toujours.
+    """
+    return os.getenv("DATABASE_PATH", "./data/multivers.db")
 
 
 def _ensure_data_dir():
     """Crée le dossier data/ si besoin (SQLite ne le fait pas tout seul)."""
-    os.makedirs(os.path.dirname(DATABASE_PATH) or ".", exist_ok=True)
+    os.makedirs(os.path.dirname(_database_path()) or ".", exist_ok=True)
 
 
 @contextmanager
@@ -24,7 +33,7 @@ def get_connection():
     activées, résultats accessibles par nom de colonne).
     """
     _ensure_data_dir()
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect(_database_path())
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     try:
@@ -66,6 +75,7 @@ def init_db():
                 content_rowid='rowid'
             );
 
+            -- Garde chunks_fts synchronisé automatiquement avec chunks
             CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN
                 INSERT INTO chunks_fts(rowid, content) VALUES (new.rowid, new.content);
             END;
@@ -81,6 +91,8 @@ def init_db():
             """
         )
 
+
+# --- Documents ---------------------------------------------------------
 
 def insert_document(doc_id: str, filename: str, file_type: str, status: str = "processing") -> dict:
     """Enregistre un nouveau document déposé, statut par défaut 'processing'."""
@@ -112,6 +124,8 @@ def list_documents() -> list[dict]:
         return [dict(row) for row in rows]
 
 
+# --- Chunks --------------------------------------------------------------
+
 def insert_chunk(chunk_id: str, document_id: str, content: str, page_number: int | None = None, position: int | None = None):
     """
     Insère un chunk (passage extrait) rattaché à un document.
@@ -137,22 +151,54 @@ def get_chunk(chunk_id: str) -> dict | None:
         return dict(row) if row else None
 
 
+def _sanitize_fts5_query(raw_query: str) -> str:
+    """
+    Transforme une question en langage naturel en requête FTS5 sûre.
+    FTS5 a sa propre syntaxe (guillemets, parenthèses, AND/OR/NOT, -, *,
+    filtres de colonne avec ':'). Envoyer une question brute ("Qu'est-ce
+    que l'utilisateur a payé ?") peut lever une erreur de syntaxe FTS5.
+    On extrait uniquement les mots (alphanumériques, accents compris),
+    chacun entre guillemets doubles (recherche littérale du terme, pas
+    interprété comme opérateur), joints par OR pour maximiser le rappel.
+    """
+    words = re.findall(r"\w+", raw_query, flags=re.UNICODE)
+    if not words:
+        return ""
+    # Chaque mot entre guillemets doubles : neutralise -, *, :, etc.
+    # dans le mot lui-même, et empêche AND/OR/NOT d'être interprétés
+    # comme opérateurs plutôt que comme mots cherchés.
+    return " OR ".join(f'"{w}"' for w in words)
+
+
 def search_chunks(query: str, k: int = 5) -> list[dict]:
     """
     Recherche plein texte via FTS5. Signature conforme à SPEC.md :
     search(query: str, k: int) -> list[Chunk]
+    La requête est assainie avant d'être envoyée à FTS5 (voir
+    _sanitize_fts5_query) ; en cas d'échec malgré tout, on retourne une
+    liste vide plutôt que de laisser remonter une erreur 500 au client.
     """
-    with get_connection() as conn:
-        rows = conn.execute(
-            """
-            SELECT c.id, c.document_id, c.content, c.page_number, c.position, d.filename
-            FROM chunks_fts
-            JOIN chunks c ON c.rowid = chunks_fts.rowid
-            JOIN documents d ON d.id = c.document_id
-            WHERE chunks_fts MATCH ?
-            ORDER BY rank
-            LIMIT ?
-            """,
-            (query, k),
-        ).fetchall()
-        return [dict(row) for row in rows]
+    safe_query = _sanitize_fts5_query(query)
+    if not safe_query:
+        return []
+
+    try:
+        with get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT c.id, c.document_id, c.content, c.page_number, c.position, d.filename
+                FROM chunks_fts
+                JOIN chunks c ON c.rowid = chunks_fts.rowid
+                JOIN documents d ON d.id = c.document_id
+                WHERE chunks_fts MATCH ?
+                ORDER BY rank
+                LIMIT ?
+                """,
+                (safe_query, k),
+            ).fetchall()
+            return [dict(row) for row in rows]
+    except sqlite3.OperationalError:
+        # Erreur de syntaxe FTS5 malgré l'assainissement (cas limite) :
+        # on ne casse pas la réponse, on considère juste qu'il n'y a
+        # pas de résultat pertinent.
+        return []
