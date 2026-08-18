@@ -12,12 +12,13 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 
-from app import db
+from app import db, extraction
 
 load_dotenv()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", "./data/uploads")
 
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
@@ -48,17 +49,29 @@ def health():
 @app.post("/upload")
 async def upload_documents(files: list[UploadFile] = File(...)):
     """
-    Reçoit un ou plusieurs documents, les enregistre en base (statut "processing").
-    TODO palier 3 (suite) : brancher l'extraction réelle
-    (détection type -> extraction -> OCR si capture -> chunks -> insert_chunk()),
-    puis passer le statut à "processed" ou "error".
+    Reçoit un ou plusieurs documents, les sauvegarde sur disque, les
+    enregistre en base (statut "processing"), puis lance l'extraction
+    réelle. Le statut final ("processed" ou "error") est mis à jour par
+    extraction.process_document(), jamais laissé bloqué en "processing".
     """
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
     results = []
     for f in files:
         doc_id = f"doc_{uuid.uuid4().hex[:8]}"
         file_type = (f.filename.rsplit(".", 1)[-1] if "." in f.filename else "unknown").lower()
         doc = db.insert_document(doc_id, f.filename, file_type, status="processing")
-        results.append(doc)
+
+        file_path = os.path.join(UPLOAD_DIR, f"{doc_id}_{f.filename}")
+        content = await f.read()
+        with open(file_path, "wb") as out:
+            out.write(content)
+
+        extraction.process_document(doc_id, file_path, file_type)
+
+        # Renvoie le statut à jour (processed/error), pas celui d'origine.
+        updated = next((d for d in db.list_documents() if d["id"] == doc_id), doc)
+        results.append(updated)
+
     return {"documents": results}
 
 
