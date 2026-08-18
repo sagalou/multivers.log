@@ -60,10 +60,21 @@ N'importe qui accumule des fichiers sans lien apparent : rapports en PDF, tableu
 5. L'utilisateur clique sur la citation, le passage source exact s'ouvre (surligné, avec référence au document et à la page/position).
 6. L'utilisateur demande un rapport de synthèse et obtient un document structuré résumant les informations extraites.
 
+## Cas d'échec géré (1 min de démo imposée par le brief)
+
+- **Document illisible ou vide déposé** (ex : PDF scanné sans OCR, fichier corrompu) → statut passe à "erreur" avec message explicite, pas de crash, pas de blocage du reste du corpus.
+- **Question sans réponse dans le corpus** → l'agent doit répondre qu'il n'a pas trouvé d'information pertinente plutôt que d'halluciner une réponse sans source.
+- **Vérification de la citation** : avant d'afficher une citation, vérifier que le passage source existe réellement en base (pas de citation fantôme).
+
+## Vérification (validation structurée)
+
+- Chaque extraction de document est validée contre un schéma minimal avant d'être marquée "traitée" (contenu non vide, métadonnées source présentes).
+- Chaque réponse générée par le LLM est vérifiée via `verify_citation` : le `chunk_id` cité doit exister en base **et** la citation (`quote`) doit être retrouvée mot pour mot dans le texte du chunk, avant d'être affichée à l'utilisateur.
+
 ## Répartition du travail
 
 - **Sagal — back** : pipeline d'extraction/structuration des documents (PDF, CSV, notes, captures), schéma SQLite (documents, chunks, chunks_fts) et index FTS5, API FastAPI, boucle agent (outil `search`, appel LLM, citations obligatoires).
-- **David — front** : dépôt multi-fichiers avec retour de statut, saisie de la question, affichage de la réponse et des citations cliquables ouvrant le passage source ; fonction `verify_citation` (le `chunk_id` cité existe bien en base avant affichage).
+- **David — front** : dépôt multi-fichiers avec retour de statut, saisie de la question, affichage de la réponse et des citations cliquables ouvrant le passage source ; fonction `verify_citation` (le `chunk_id` cité existe bien en base et la citation correspond au texte du chunk, avant affichage).
 - Le détail palier par palier est dans `REPARTITION.md`.
 - Alternance obligatoire à chaque checkpoint pour la présentation orale.
 
@@ -73,4 +84,4 @@ N'importe qui accumule des fichiers sans lien apparent : rapports en PDF, tableu
 - Extraction : `pypdf`/`pdfplumber` (PDF), `pandas` (CSV), `pytesseract`/`Pillow` (OCR des captures d'écran)
 - Recherche : SQLite + FTS5 (choix délibéré, pas d'embeddings en V1 — voir hors scope #6)
 - Front : React + Vite (JavaScript, CSS simple, pas de librairie UI)
-- LLM : Gemini 2.5 Flash via `google-generativeai` (clé fournie par l'école, lue depuis `.env`, jamais commitée)
+- LLM : Gemini 2.5 Flash via `google-generativeai` (clé API personnelle Google AI Studio, lue depuis `.env`, jamais commitée)
