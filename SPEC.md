@@ -84,4 +84,4 @@ N'importe qui accumule des fichiers sans lien apparent : rapports en PDF, tableu
 - Extraction : `pypdf`/`pdfplumber` (PDF), `pandas` (CSV), `pytesseract`/`Pillow` (OCR des captures d'écran)
 - Recherche : SQLite + FTS5 (choix délibéré, pas d'embeddings en V1 — voir hors scope #6)
 - Front : React + Vite (JavaScript, CSS simple, pas de librairie UI)
-- LLM : Gemini 2.5 Flash via `google-generativeai` (clé API personnelle Google AI Studio, lue depuis `.env`, jamais commitée)
+- LLM : Gemini 3.6 Flash via `google-generativeai` (clé API personnelle Google AI Studio, lue depuis `.env`, jamais commitée)

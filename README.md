@@ -57,7 +57,7 @@ Le contrat d'API entre front et back est figé dans [`API_CONTRACT.md`](./API_CO
 
 - **SQLite + FTS5** pour le stockage et la recherche (à venir palier 3), plutôt qu'une base vectorielle (Chroma). Gratuit, zéro dépendance externe, zéro appel API supplémentaire.
 - **Tesseract (OCR local)** pour extraire le texte des captures d'écran (à venir palier 3), gratuit et local, cohérent avec le choix FTS5.
-- **Gemini 2.5 Flash** comme LLM, clé API personnelle (tier gratuit), pas de coût pour le hackathon.
+- **Gemini 3.6 Flash** comme LLM, clé API personnelle (tier gratuit), pas de coût pour le hackathon.
 - **FastAPI** pour le back, **React + Vite** pour le front.
 - **Pas d'authentification** : un simple champ nom d'utilisateur suffit pour ce hackathon, pas de gestion de comptes.
 
