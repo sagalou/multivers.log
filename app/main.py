@@ -349,11 +349,60 @@ async def ask_question(payload: dict):
     }
 
 
+REPORT_SYSTEM_PROMPT = """You summarize a document corpus for the user.
+Write a short narrative summary, a few sentences, based only on the excerpts \
+given to you. Mention what kinds of documents are present and what they \
+seem to cover. Do not invent details not shown in the excerpts. \
+Answer in French."""
+
+
 @app.post("/report")
 async def generate_report(payload: dict):
-    """Produce a summary of the whole corpus, still a placeholder"""
+    """Produce a real narrative summary of the corpus, from a sample of each document"""
+
+    documents = [d for d in db.list_documents() if d["status"] == "processed"]
+
+    if not documents:
+        return {
+            "report": "Le corpus est vide, aucun document traité à résumer.",
+            "sources": [],
+        }
+
+    if client is None:
+        return {
+            "report": "NVIDIA_API_KEY manquante côté serveur, impossible de générer le rapport.",
+            "sources": [],
+        }
+
+    excerpt_blocks = []
+    for doc in documents:
+        chunks = db.list_chunks_for_document(doc["id"], limit=3)
+        preview = " ".join(c["content"][:300] for c in chunks)
+        if preview:
+            excerpt_blocks.append(f"[{doc['filename']}]\n{preview}")
+
+    if not excerpt_blocks:
+        return {
+            "report": "Les documents traités ne contiennent aucun texte exploitable.",
+            "sources": [d["id"] for d in documents],
+        }
+
+    try:
+        response = client.chat.completions.create(
+            model=NVIDIA_MODEL,
+            messages=[
+                {"role": "system", "content": REPORT_SYSTEM_PROMPT},
+                {"role": "user", "content": "\n\n".join(excerpt_blocks)},
+            ],
+        )
+        report_text = response.choices[0].message.content
+    except Exception as exc:
+        return {
+            "report": f"Erreur lors de la génération du rapport : {exc}",
+            "sources": [],
+        }
 
     return {
-        "report": "Rapport factice en attendant l'implémentation.",
-        "sources": [doc["id"] for doc in db.list_documents()],
+        "report": report_text,
+        "sources": [d["id"] for d in documents],
     }

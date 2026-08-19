@@ -231,3 +231,20 @@ def delete_all_documents() -> int:
         conn.execute("DELETE FROM documents")
 
         return count
+
+def list_chunks_for_document(document_id: str, limit: int = 3) -> list[dict]:
+    """Return a sample of chunks for one document, in reading order
+
+    Used by /report to build a compact preview of the corpus: sending every
+    chunk of every document would repeat the palier 3 trap of dumping raw
+    content into the model's context, so only the first few chunks per
+    document are used.
+    """
+
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, content, page_number, position FROM chunks "
+            "WHERE document_id = ? ORDER BY position LIMIT ?",
+            (document_id, limit),
+        ).fetchall()
+        return [dict(row) for row in rows]
