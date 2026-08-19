@@ -1,5 +1,13 @@
 import { useEffect, useState } from "react";
-import { askQuestion, getChunk, isMockMode, listDocuments, uploadDocuments } from "./api";
+import {
+  askQuestion,
+  getChunk,
+  isMockMode,
+  listDocuments,
+  listTools,
+  setToolEnabled,
+  uploadDocuments,
+} from "./api";
 import "./App.css";
 
 // Maps the raw status sent by the back to the wording shown on screen
@@ -20,6 +28,29 @@ function statusLabel(status) {
     return STATUS_LABELS[status];
   }
   return status;
+}
+
+// Reuses the document status colours for a tool call result
+function stepStatusClass(status) {
+  if (status === "ok") {
+    return "status status-processed";
+  }
+  return "status status-error";
+}
+
+// Class and wording of the on/off button, kept out of the markup
+function toggleClass(enabled) {
+  if (enabled) {
+    return "toggle toggle-on";
+  }
+  return "toggle toggle-off";
+}
+
+function toggleLabel(enabled) {
+  if (enabled) {
+    return "actif";
+  }
+  return "desactive";
 }
 
 // Turns a token count into an estimated price in dollars
@@ -44,6 +75,10 @@ function App() {
   const [passage, setPassage] = useState(null);
   const [loadingPassage, setLoadingPassage] = useState("");
 
+  // Agent tools and their on/off state, mirrored from the server
+  const [tools, setTools] = useState([]);
+  const [togglingTool, setTogglingTool] = useState("");
+
   // Reloads the document list from the server, after an upload or on page load
   async function refreshDocuments() {
     try {
@@ -54,10 +89,36 @@ function App() {
     }
   }
 
+  // Reads which tools the agent may currently call
+  async function refreshTools() {
+    try {
+      const list = await listTools();
+      setTools(list);
+    } catch (failure) {
+      setError(`Liste des outils indisponible : ${failure.message}`);
+    }
+  }
+
   // Empty brackets mean: run this once, when the page opens
   useEffect(() => {
     refreshDocuments();
+    refreshTools();
   }, []);
+
+  // Switches a tool off to show the agent coping with a broken tool, or back on
+  async function handleToggleTool(tool) {
+    setError("");
+    setTogglingTool(tool.name);
+
+    try {
+      const list = await setToolEnabled(tool.name, !tool.enabled);
+      setTools(list);
+    } catch (failure) {
+      setError(`Impossible de changer l'etat de l'outil : ${failure.message}`);
+    } finally {
+      setTogglingTool("");
+    }
+  }
 
   // Handles both ways of picking files: the file dialog and the drop zone
   async function handleFiles(fileList) {
@@ -222,6 +283,35 @@ function App() {
         )}
       </section>
 
+      {/* Tool switches: unplug one live to show the agent handling the failure */}
+      {tools.length > 0 && (
+        <section className="card">
+          <h2>Outils de l&apos;agent</h2>
+          <ul className="tools">
+            {tools.map((tool) => (
+              <li key={tool.name} className="tool">
+                <div className="tool-head">
+                  <span className="tool-name">{tool.name}</span>
+                  <button
+                    type="button"
+                    className={toggleClass(tool.enabled)}
+                    onClick={() => handleToggleTool(tool)}
+                    disabled={togglingTool === tool.name}
+                  >
+                    {toggleLabel(tool.enabled)}
+                  </button>
+                </div>
+                <p className="tool-description">{tool.description}</p>
+              </li>
+            ))}
+          </ul>
+          <p className="hint">
+            Un outil desactive reste annonce au modele. Il l&apos;appelle, recoit une
+            erreur, et doit dire qu&apos;il n&apos;a pas pu.
+          </p>
+        </section>
+      )}
+
       {/* Question form, disabled while a request is in flight or the field is empty */}
       <section className="card">
         <h2>Poser une question</h2>
@@ -303,7 +393,7 @@ function App() {
                 <span className="step-tool">{step.tool}</span>
                 <span className="step-args">{JSON.stringify(step.args)}</span>
                 <span className="step-time">{step.duration_ms} ms</span>
-                <span className={`status status-${step.status === "ok" ? "processed" : "error"}`}>
+                <span className={stepStatusClass(step.status)}>
                   {step.status}
                 </span>
                 {step.error && <span className="reason">{step.error}</span>}

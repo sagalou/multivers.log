@@ -361,3 +361,63 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+
+/* One card row per agent tool, with its description under the switch */
+.tools {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tool {
+  border: 1px solid var(--bordure);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.tool-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* Monospace: it is the exact name the model sees in its tool list */
+.tool-name {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-weight: 600;
+}
+
+/* Same wording the model reads, shown so the choice can be explained out loud */
+.tool-description {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--texte-doux);
+}
+
+.toggle {
+  border: 0;
+  border-radius: 999px;
+  padding: 4px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.toggle:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.toggle-on {
+  background: #e3f2ea;
+  color: var(--vert);
+}
+
+.toggle-off {
+  background: #fbe6e5;
+  color: var(--rouge);
+}

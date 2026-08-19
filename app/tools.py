@@ -51,6 +51,37 @@ TOOL_FUNCTIONS = {
     "list_corpus": list_corpus,
 }
 
+# Tools switched off from the UI. They stay declared to the model on purpose:
+# the point is to watch the agent handle a broken tool, not to hide it
+DISABLED_TOOLS = set()
+
+
+def list_tool_states() -> list[dict]:
+    """Report every tool and whether it is currently enabled"""
+
+    return [
+        {
+            "name": declaration["name"],
+            "description": declaration["description"],
+            "enabled": declaration["name"] not in DISABLED_TOOLS,
+        }
+        for declaration in TOOL_DECLARATIONS
+    ]
+
+
+def set_tool_enabled(name: str, enabled: bool) -> bool:
+    """Switch one tool on or off, returning False if the name is unknown"""
+
+    if name not in TOOL_FUNCTIONS:
+        return False
+
+    if enabled:
+        DISABLED_TOOLS.discard(name)
+    else:
+        DISABLED_TOOLS.add(name)
+
+    return True
+
 # Declarations sent to the model. The descriptions are the real work here:
 # the model picks a tool from these words alone, so they say when to use it,
 # not just what it does
@@ -95,6 +126,20 @@ def run_tool(name: str, args: dict) -> tuple[dict, dict]:
     """Run one tool by name, returning its result and a trace entry for the UI"""
 
     started = time.perf_counter()
+
+    # A tool switched off from the UI fails like a broken one, so the agent has
+    # to admit it could not run instead of pretending otherwise
+    if name in DISABLED_TOOLS:
+        return (
+            {"error": f"Tool {name} is currently disabled"},
+            {
+                "tool": name,
+                "args": args,
+                "status": "error",
+                "error": "outil desactive",
+                "duration_ms": 0,
+            },
+        )
 
     function = TOOL_FUNCTIONS.get(name)
 
