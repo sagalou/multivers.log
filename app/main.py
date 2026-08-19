@@ -1,6 +1,8 @@
 """FastAPI back end: upload, document listing, questions and source passages"""
 
+import json
 import os
+import time
 import uuid
 
 import google.generativeai as genai
@@ -8,7 +10,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 
-from app import db, extraction
+from app import db, extraction, tools
 
 # Must run before reading any variable below, it fills os.environ from .env
 load_dotenv()
@@ -17,6 +19,25 @@ load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "./data/uploads")
+
+# Stops the agent looping forever if the model keeps asking for tools
+MAX_AGENT_STEPS = 5
+
+# Read by the model before every answer, it is what forbids inventing a source
+SYSTEM_PROMPT = """You are Multivers.log, an assistant answering questions about \
+the user's own uploaded documents.
+
+Rules you must follow:
+- Answer only from what the tools return. Never use outside knowledge.
+- Every factual claim must come from a passage returned by search_documents.
+- When you cite, copy the sentence from the passage word for word. Never reword it.
+- Call search_documents once. If the passages do not answer the question, say so \
+instead of searching again with other words.
+- If the tools return nothing relevant, say you found no information in the corpus. \
+Do not guess, do not fill the gap.
+- If a tool reports an error, say you could not complete the search. Do not pretend \
+you succeeded.
+- Answer in the language of the question."""
 
 # Without a key the server still starts, only /ask reports it cannot answer
 if GEMINI_API_KEY:
@@ -83,6 +104,37 @@ def list_documents():
     return {"documents": db.list_documents()}
 
 
+@app.delete("/documents/{doc_id}")
+def delete_document(doc_id: str):
+    """Delete one document, its chunks and its file on disk"""
+
+    deleted = db.delete_document(doc_id)
+
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
+
+    # Files are stored prefixed with their doc_id at upload time
+    if os.path.isdir(UPLOAD_DIR):
+        for filename in os.listdir(UPLOAD_DIR):
+            if filename.startswith(f"{doc_id}_"):
+                os.remove(os.path.join(UPLOAD_DIR, filename))
+
+    return {"deleted": doc_id}
+
+
+@app.delete("/documents")
+def delete_all_documents():
+    """Clear the whole corpus, useful to restart a demo from an empty list"""
+
+    count = db.delete_all_documents()
+
+    if os.path.isdir(UPLOAD_DIR):
+        for filename in os.listdir(UPLOAD_DIR):
+            os.remove(os.path.join(UPLOAD_DIR, filename))
+
+    return {"deleted_count": count}
+
+
 @app.get("/chunks/{chunk_id}")
 def get_chunk(chunk_id: str):
     """Return one full passage, so clicking a citation can open its source"""
@@ -91,52 +143,129 @@ def get_chunk(chunk_id: str):
 
     # A citation pointing at nothing is an error worth reporting, not an empty answer
     if chunk is None:
-        raise HTTPException(status_code=404, detail=f"Chunk {chunk_id} introuvable.")
+        raise HTTPException(status_code=404, detail=f"Chunk {chunk_id} not found")
 
     return chunk
 
 
+def _no_answer(message: str, trace: list | None = None) -> dict:
+    """Build the single failure shape the front handles, whatever went wrong"""
+
+    return {
+        "answer": None,
+        "citations": [],
+        "no_answer": True,
+        "message": message,
+        "trace": trace or [],
+    }
+
+
+def _citations_from_trace(trace: list) -> list:
+    """Collect the passages the tools returned, so the front can link each source"""
+
+    citations = []
+    seen = set()
+
+    for entry in trace:
+        for passage in entry.get("passages", []):
+            # The same passage can come back from two searches, cite it once
+            if passage["chunk_id"] in seen:
+                continue
+
+            seen.add(passage["chunk_id"])
+            citations.append(
+                {
+                    "chunk_id": passage["chunk_id"],
+                    "doc_id": passage["document"],
+                    "page": passage["page"],
+                    "quote": passage["text"],
+                }
+            )
+
+    return citations
+
+
 @app.post("/ask")
 async def ask_question(payload: dict):
-    """Answer a natural language question, never raising a 500 to the caller"""
+    """Answer a question by letting the model call tools, never raising a 500"""
 
     question = payload.get("question", "")
 
-    # Three guards below share one answer shape, so the front handles a single case
+    # Two guards below share the failure shape, so the front handles a single case
     if not question:
-        return {
-            "answer": None,
-            "citations": [],
-            "no_answer": True,
-            "message": "Question vide.",
-        }
+        return _no_answer("Question vide.")
 
     if not GEMINI_API_KEY:
-        return {
-            "answer": None,
-            "citations": [],
-            "no_answer": True,
-            "message": "GEMINI_API_KEY manquante côté serveur (voir .env).",
-        }
+        return _no_answer("GEMINI_API_KEY manquante côté serveur (voir .env).")
 
-    # Real call to the model, palier 4 will add db.search_chunks() for context
+    started = time.perf_counter()
+    trace = []
+
     try:
-        model = genai.GenerativeModel(GEMINI_MODEL)
-        response = model.generate_content(question)
+        model = genai.GenerativeModel(
+            GEMINI_MODEL,
+            system_instruction=SYSTEM_PROMPT,
+            tools=[{"function_declarations": tools.TOOL_DECLARATIONS}],
+        )
+        chat = model.start_chat()
+        response = chat.send_message(question)
+
+        # The model decides which tool to call and when to stop, we only run what
+        # it asks for and hand the result back until it answers in plain text
+        for _ in range(MAX_AGENT_STEPS):
+            calls = [
+                part.function_call
+                for part in response.candidates[0].content.parts
+                if getattr(part, "function_call", None) and part.function_call.name
+            ]
+
+            if not calls:
+                break
+
+            replies = []
+
+            for call in calls:
+                args = dict(call.args) if call.args else {}
+                result, entry = tools.run_tool(call.name, args)
+
+                # Passages travel with the trace so citations survive the loop
+                if isinstance(result, dict) and result.get("passages"):
+                    entry["passages"] = result["passages"]
+
+                trace.append(entry)
+
+                # Sent as a JSON string: the library chokes on nested lists of
+                # objects inside a function response
+                replies.append(
+                    genai.protos.Part(
+                        function_response=genai.protos.FunctionResponse(
+                            name=call.name,
+                            response={"result": json.dumps(result, ensure_ascii=False)},
+                        )
+                    )
+                )
+
+            response = chat.send_message(replies)
+
         answer_text = response.text
+
     except Exception as exc:
         # Refused key, exhausted quota, network cut during the demo: fall back to
         # the same no_answer shape instead of letting a raw 500 reach the front
-        return {
-            "answer": None,
-            "citations": [],
-            "no_answer": True,
-            "message": f"Erreur lors de l'appel au LLM : {exc}",
-        }
+        return _no_answer(f"Erreur lors de l'appel au LLM : {exc}", trace)
+
+    usage = getattr(response, "usage_metadata", None)
 
     return {
         "answer": answer_text,
-        "citations": [],  # filled at palier 4, once search is wired in
+        "citations": _citations_from_trace(trace),
+        "trace": trace,
+        # Shown in the UI so the cost of a question is never invisible
+        "usage": {
+            "input_tokens": getattr(usage, "prompt_token_count", None),
+            "output_tokens": getattr(usage, "candidates_token_count", None),
+            "latency_ms": round((time.perf_counter() - started) * 1000, 1),
+        },
     }
 
 
