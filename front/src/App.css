@@ -1,3 +1,4 @@
+/* Centred column, the whole layout fits in one narrow page */
 .page {
   max-width: 780px;
   margin: 0 auto;
@@ -7,6 +8,7 @@
   gap: 20px;
 }
 
+/* Title on the left, mode badge on the right, wraps on small screens */
 .header {
   display: flex;
   align-items: flex-start;
@@ -25,6 +27,7 @@
   color: var(--texte-doux);
 }
 
+/* Pill shape shared by both mode badges */
 .mode {
   padding: 4px 12px;
   border-radius: 999px;
@@ -33,16 +36,19 @@
   white-space: nowrap;
 }
 
+/* Green when the real server answers */
 .mode-live {
   background: #e3f2ea;
   color: var(--vert);
 }
 
+/* Orange when demo data is shown, hard to miss by accident */
 .mode-mock {
   background: #fdf0dd;
   color: var(--orange);
 }
 
+/* One box per step of the flow: upload, list, question, answer */
 .card {
   background: var(--carte);
   border: 1px solid var(--bordure);
@@ -58,6 +64,7 @@
   margin-bottom: 14px;
 }
 
+/* Dashed area covering the hidden file input */
 .dropzone {
   display: flex;
   flex-direction: column;
@@ -70,12 +77,14 @@
   text-align: center;
 }
 
+/* Same highlight whether the mouse hovers or a file is dragged over */
 .dropzone:hover,
 .dropzone-active {
   border-color: var(--accent);
   background: #f2f5ff;
 }
 
+/* The real input is hidden, the label around it does the clicking */
 .dropzone input {
   display: none;
 }
@@ -84,6 +93,7 @@
   color: var(--texte-doux);
 }
 
+/* Plain vertical list, browser bullets removed */
 .documents {
   list-style: none;
   margin: 0;
@@ -93,6 +103,7 @@
   gap: 8px;
 }
 
+/* One row per document, wraps to show the error message below */
 .document {
   display: flex;
   align-items: center;
@@ -103,12 +114,14 @@
   flex-wrap: wrap;
 }
 
+/* Takes the remaining width and breaks long names instead of overflowing */
 .filename {
   flex: 1;
   font-weight: 500;
   word-break: break-all;
 }
 
+/* Status badge, colour comes from the status-* class next to it */
 .status {
   padding: 2px 10px;
   border-radius: 999px;
@@ -116,27 +129,32 @@
   font-weight: 600;
 }
 
+/* Orange: extraction still running */
 .status-processing {
   background: #fdf0dd;
   color: var(--orange);
 }
 
+/* Green: document readable and searchable */
 .status-processed {
   background: #e3f2ea;
   color: var(--vert);
 }
 
+/* Red: document could not be read */
 .status-error {
   background: #fbe6e5;
   color: var(--rouge);
 }
 
+/* Error message pushed onto its own line under the file name */
 .reason {
   flex-basis: 100%;
   font-size: 14px;
   color: var(--rouge);
 }
 
+/* Question field and button side by side, stacking when too narrow */
 .ask {
   display: flex;
   gap: 10px;
@@ -151,6 +169,7 @@
   border-radius: 8px;
 }
 
+/* Visible focus ring, needed for keyboard navigation */
 .ask input:focus {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
@@ -166,11 +185,13 @@
   cursor: pointer;
 }
 
+/* Greyed out while waiting or when the field is empty */
 .ask button:disabled {
   background: #b8c2d9;
   cursor: not-allowed;
 }
 
+/* pre-wrap keeps the line breaks sent by the model */
 .answer {
   margin: 0 0 16px;
   white-space: pre-wrap;
@@ -185,6 +206,7 @@
   gap: 8px;
 }
 
+/* Coloured left border marks the quoted source passage */
 .citation {
   border-left: 3px solid var(--accent);
   background: #f7f9ff;
@@ -197,6 +219,7 @@
   font-style: italic;
 }
 
+/* Document name and page, smaller and dimmer than the quote */
 .source {
   display: block;
   margin-top: 4px;
@@ -204,11 +227,13 @@
   color: var(--texte-doux);
 }
 
+/* Neutral grey text for empty states and waiting messages */
 .hint {
   margin: 0;
   color: var(--texte-doux);
 }
 
+/* Full width message, shared shape for errors and warnings */
 .banner {
   margin: 0;
   padding: 12px 16px;
@@ -216,11 +241,13 @@
   font-size: 15px;
 }
 
+/* Red: something failed */
 .banner-error {
   background: #fbe6e5;
   color: var(--rouge);
 }
 
+/* Orange: the server answered but could not help */
 .banner-warning {
   background: #fdf0dd;
   color: var(--orange);

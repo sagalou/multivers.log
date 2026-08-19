@@ -1,8 +1,4 @@
-"""
-Multivers.log — Couche base de données (SQLite + FTS5)
-Palier 3 : schéma et fonctions de base. L'extraction (PDF/CSV/notes/OCR)
-vient ensuite, elle appellera insert_chunk() pour chaque passage extrait.
-"""
+"""Database layer: SQLite schema, chunk storage and FTS5 full text search"""
 
 import os
 import re
@@ -12,45 +8,45 @@ from datetime import datetime, timezone
 
 
 def _database_path() -> str:
-    """
-    Lecture différée (pas au chargement du module) pour ne pas dépendre
-    de l'ordre entre load_dotenv() et l'import de ce module : si ce module
-    est importé avant que le .env soit chargé, une valeur lue une seule
-    fois à l'import figerait le défaut et ignorerait le .env pour toujours.
-    """
+    """Read the database path on every call, never once at import time"""
+
+    # Reading at import would freeze the default value if this module were
+    # imported before load_dotenv() ran, silently ignoring the .env forever
     return os.getenv("DATABASE_PATH", "./data/multivers.db")
 
 
 def _ensure_data_dir():
-    """Crée le dossier data/ si besoin (SQLite ne le fait pas tout seul)."""
+    """Create the data directory, SQLite does not create it by itself"""
+
     os.makedirs(os.path.dirname(_database_path()) or ".", exist_ok=True)
 
 
 @contextmanager
 def get_connection():
-    """
-    Fournit une connexion SQLite avec les bonnes options (clés étrangères
-    activées, résultats accessibles par nom de colonne).
-    """
+    """Open a SQLite connection with the right options, and always close it"""
+
     _ensure_data_dir()
     conn = sqlite3.connect(_database_path())
+
+    # Row lets results be read by column name instead of by index
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+
     try:
         yield conn
         conn.commit()
     finally:
+        # finally runs even if the caller raised, so no connection leaks
         conn.close()
 
 
 def init_db():
-    """
-    Crée les tables si elles n'existent pas encore. Appelée au démarrage
-    de l'app (voir main.py), sans danger si déjà existantes (IF NOT EXISTS).
-    """
+    """Create the tables if they do not exist yet, called at server startup"""
+
     with get_connection() as conn:
         conn.executescript(
             """
+            -- One row per uploaded file, error_message explains a failed status
             CREATE TABLE IF NOT EXISTS documents (
                 id TEXT PRIMARY KEY,
                 filename TEXT NOT NULL,
@@ -60,6 +56,7 @@ def init_db():
                 error_message TEXT
             );
 
+            -- One row per extracted passage, page_number is null for CSV and notes
             CREATE TABLE IF NOT EXISTS chunks (
                 id TEXT PRIMARY KEY,
                 document_id TEXT NOT NULL,
@@ -69,13 +66,14 @@ def init_db():
                 FOREIGN KEY (document_id) REFERENCES documents(id)
             );
 
+            -- Search index over chunks.content, stores no copy of the text itself
             CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
                 content,
                 content='chunks',
                 content_rowid='rowid'
             );
 
-            -- Garde chunks_fts synchronisé automatiquement avec chunks
+            -- These three triggers keep the index in sync with the chunks table
             CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN
                 INSERT INTO chunks_fts(rowid, content) VALUES (new.rowid, new.content);
             END;
@@ -95,19 +93,25 @@ def init_db():
 # --- Documents ---------------------------------------------------------
 
 def insert_document(doc_id: str, filename: str, file_type: str, status: str = "processing") -> dict:
-    """Enregistre un nouveau document déposé, statut par défaut 'processing'."""
+    """Record a newly uploaded document, before its content is extracted"""
+
+    # Stored in UTC ISO format so ORDER BY sorts chronologically as plain text
     uploaded_at = datetime.now(timezone.utc).isoformat()
+
     with get_connection() as conn:
         conn.execute(
             "INSERT INTO documents (id, filename, file_type, uploaded_at, status) "
             "VALUES (?, ?, ?, ?, ?)",
             (doc_id, filename, file_type, uploaded_at, status),
         )
+
+    # Same shape as GET /documents, so the front reads both the same way
     return {"id": doc_id, "filename": filename, "status": status}
 
 
 def update_document_status(doc_id: str, status: str, error_message: str | None = None):
-    """Met à jour le statut d'un document (processing -> processed / error)."""
+    """Move a document from processing to processed or error"""
+
     with get_connection() as conn:
         conn.execute(
             "UPDATE documents SET status = ?, error_message = ? WHERE id = ?",
@@ -116,7 +120,8 @@ def update_document_status(doc_id: str, status: str, error_message: str | None =
 
 
 def list_documents() -> list[dict]:
-    """Liste tous les documents avec leur statut, pour GET /documents."""
+    """List every document and its status, for GET /documents"""
+
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT id, filename, status, error_message FROM documents ORDER BY uploaded_at"
@@ -127,10 +132,9 @@ def list_documents() -> list[dict]:
 # --- Chunks --------------------------------------------------------------
 
 def insert_chunk(chunk_id: str, document_id: str, content: str, page_number: int | None = None, position: int | None = None):
-    """
-    Insère un chunk (passage extrait) rattaché à un document.
-    L'indexation FTS5 se fait automatiquement via le trigger chunks_ai.
-    """
+    """Store one extracted passage attached to its document"""
+
+    # No indexing call here, the chunks_ai trigger fills chunks_fts on its own
     with get_connection() as conn:
         conn.execute(
             "INSERT INTO chunks (id, document_id, content, page_number, position) "
@@ -140,8 +144,10 @@ def insert_chunk(chunk_id: str, document_id: str, content: str, page_number: int
 
 
 def get_chunk(chunk_id: str) -> dict | None:
-    """Récupère un chunk par son id, utilisé pour vérifier une citation."""
+    """Fetch one passage by id, used to verify a citation and to open the source"""
+
     with get_connection() as conn:
+        # The join brings the file name along, the front needs it to label the source
         row = conn.execute(
             "SELECT c.id, c.document_id, c.content, c.page_number, c.position, d.filename "
             "FROM chunks c JOIN documents d ON d.id = c.document_id "
@@ -152,38 +158,31 @@ def get_chunk(chunk_id: str) -> dict | None:
 
 
 def _sanitize_fts5_query(raw_query: str) -> str:
-    """
-    Transforme une question en langage naturel en requête FTS5 sûre.
-    FTS5 a sa propre syntaxe (guillemets, parenthèses, AND/OR/NOT, -, *,
-    filtres de colonne avec ':'). Envoyer une question brute ("Qu'est-ce
-    que l'utilisateur a payé ?") peut lever une erreur de syntaxe FTS5.
-    On extrait uniquement les mots (alphanumériques, accents compris),
-    chacun entre guillemets doubles (recherche littérale du terme, pas
-    interprété comme opérateur), joints par OR pour maximiser le rappel.
-    """
+    """Turn a natural language question into a safe FTS5 query"""
+
+    # FTS5 has its own syntax: quotes, parentheses, AND OR NOT, -, *, column
+    # filters with ':'. A raw French question would raise a syntax error
     words = re.findall(r"\w+", raw_query, flags=re.UNICODE)
     if not words:
         return ""
-    # Chaque mot entre guillemets doubles : neutralise -, *, :, etc.
-    # dans le mot lui-même, et empêche AND/OR/NOT d'être interprétés
-    # comme opérateurs plutôt que comme mots cherchés.
+
+    # Double quotes make each word literal, so AND OR NOT stay plain words
+    # OR between them widens the search instead of requiring every word
     return " OR ".join(f'"{w}"' for w in words)
 
 
 def search_chunks(query: str, k: int = 5) -> list[dict]:
-    """
-    Recherche plein texte via FTS5. Signature conforme à SPEC.md :
-    search(query: str, k: int) -> list[Chunk]
-    La requête est assainie avant d'être envoyée à FTS5 (voir
-    _sanitize_fts5_query) ; en cas d'échec malgré tout, on retourne une
-    liste vide plutôt que de laisser remonter une erreur 500 au client.
-    """
+    """Full text search over the chunks, returning the k best passages"""
+
     safe_query = _sanitize_fts5_query(query)
+
+    # A question made only of punctuation leaves nothing to search for
     if not safe_query:
         return []
 
     try:
         with get_connection() as conn:
+            # ORDER BY rank uses the FTS5 relevance score, best matches first
             rows = conn.execute(
                 """
                 SELECT c.id, c.document_id, c.content, c.page_number, c.position, d.filename
@@ -198,7 +197,6 @@ def search_chunks(query: str, k: int = 5) -> list[dict]:
             ).fetchall()
             return [dict(row) for row in rows]
     except sqlite3.OperationalError:
-        # Erreur de syntaxe FTS5 malgré l'assainissement (cas limite) :
-        # on ne casse pas la réponse, on considère juste qu'il n'y a
-        # pas de résultat pertinent.
+        # Edge case FTS5 syntax error despite sanitizing: treat it as no result
+        # rather than letting a 500 reach the client
         return []

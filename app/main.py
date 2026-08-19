@@ -1,8 +1,4 @@
-"""
-Multivers.log — Back FastAPI
-Palier 3 : schéma SQLite + FTS5 branché (documents, chunks).
-L'extraction réelle (PDF/CSV/notes/OCR) reste à brancher ensuite dans /upload.
-"""
+"""FastAPI back end: upload, document listing, questions and source passages"""
 
 import os
 import uuid
@@ -14,21 +10,24 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app import db, extraction
 
+# Must run before reading any variable below, it fills os.environ from .env
 load_dotenv()
 
+# Settings read once at startup, with defaults for everything but the API key
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "./data/uploads")
 
+# Without a key the server still starts, only /ask reports it cannot answer
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
 app = FastAPI(title="Multivers.log API")
 
-# Autorise le front (autre origine en dev) à appeler l'API.
+# The front runs on another port, so the browser needs this to allow the calls
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # à restreindre en prod / durcissement (palier 5)
+    allow_origins=["*"],  # to be restricted before production, palier 5
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -36,39 +35,41 @@ app.add_middleware(
 
 @app.on_event("startup")
 def on_startup():
-    """Crée les tables SQLite si besoin, au démarrage du serveur."""
+    """Create the SQLite tables if needed, when the server boots"""
+
     db.init_db()
 
 
 @app.get("/health")
 def health():
-    """Vérifie que le serveur tourne, utile pour le front pendant le dev."""
+    """Tell the caller the server is alive, used by the front during development"""
+
     return {"status": "ok"}
 
 
 @app.post("/upload")
 async def upload_documents(files: list[UploadFile] = File(...)):
-    """
-    Reçoit un ou plusieurs documents, les sauvegarde sur disque, les
-    enregistre en base (statut "processing"), puis lance l'extraction
-    réelle. Le statut final ("processed" ou "error") est mis à jour par
-    extraction.process_document(), jamais laissé bloqué en "processing".
-    """
+    """Store the uploaded files, extract their content, return the final statuses"""
+
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     results = []
+
     for f in files:
+        # Random short id, enough to stay unique without a counter in the database
         doc_id = f"doc_{uuid.uuid4().hex[:8]}"
         file_type = (f.filename.rsplit(".", 1)[-1] if "." in f.filename else "unknown").lower()
         doc = db.insert_document(doc_id, f.filename, file_type, status="processing")
 
+        # Prefix the saved name with the id, so two identical names never collide
         file_path = os.path.join(UPLOAD_DIR, f"{doc_id}_{f.filename}")
         content = await f.read()
         with open(file_path, "wb") as out:
             out.write(content)
 
+        # Reads the file and fills the chunks table, then sets processed or error
         extraction.process_document(doc_id, file_path, file_type)
 
-        # Renvoie le statut à jour (processed/error), pas celui d'origine.
+        # Return the updated status, not the processing one recorded a moment ago
         updated = next((d for d in db.list_documents() if d["id"] == doc_id), doc)
         results.append(updated)
 
@@ -77,33 +78,31 @@ async def upload_documents(files: list[UploadFile] = File(...)):
 
 @app.get("/documents")
 def list_documents():
-    """Liste les documents et leur statut, pour la vue liste du front."""
+    """List every document and its status, so the front can fill its list on load"""
+
     return {"documents": db.list_documents()}
 
 
 @app.get("/chunks/{chunk_id}")
 def get_chunk(chunk_id: str):
-    """
-    Renvoie le passage complet d'un chunk, pour l'étape 5 du happy path
-    (clic sur une citation -> ouverture du passage source exact, surligné).
-    db.get_chunk() faisait déjà tout le travail côté base, il manquait
-    juste la route HTTP pour le rendre accessible depuis le front.
-    """
+    """Return one full passage, so clicking a citation can open its source"""
+
     chunk = db.get_chunk(chunk_id)
+
+    # A citation pointing at nothing is an error worth reporting, not an empty answer
     if chunk is None:
         raise HTTPException(status_code=404, detail=f"Chunk {chunk_id} introuvable.")
+
     return chunk
 
 
 @app.post("/ask")
 async def ask_question(payload: dict):
-    """
-    Reçoit une question en langage naturel.
-    Palier 3 : toujours pas de recherche branchée dans la boucle de réponse
-    (le contexte issu du corpus arrive au palier 4, via db.search_chunks()).
-    """
+    """Answer a natural language question, never raising a 500 to the caller"""
+
     question = payload.get("question", "")
 
+    # Three guards below share one answer shape, so the front handles a single case
     if not question:
         return {
             "answer": None,
@@ -120,16 +119,14 @@ async def ask_question(payload: dict):
             "message": "GEMINI_API_KEY manquante côté serveur (voir .env).",
         }
 
-    # Appel réel au LLM (palier 4 : brancher db.search_chunks() pour le contexte).
+    # Real call to the model, palier 4 will add db.search_chunks() for context
     try:
         model = genai.GenerativeModel(GEMINI_MODEL)
         response = model.generate_content(question)
         answer_text = response.text
     except Exception as exc:
-        # Clé refusée, quota épuisé, réseau coupé pendant la démo, etc. :
-        # on ne laisse jamais remonter une 500 brute, on retombe sur le
-        # même format no_answer que pour une question vide ou une clé
-        # manquante, cohérent pour le front.
+        # Refused key, exhausted quota, network cut during the demo: fall back to
+        # the same no_answer shape instead of letting a raw 500 reach the front
         return {
             "answer": None,
             "citations": [],
@@ -139,16 +136,14 @@ async def ask_question(payload: dict):
 
     return {
         "answer": answer_text,
-        "citations": [],  # les vraies citations arrivent au palier 4, avec search_chunks()
+        "citations": [],  # filled at palier 4, once search is wired in
     }
 
 
 @app.post("/report")
 async def generate_report(payload: dict):
-    """
-    Génère un rapport de synthèse sur le corpus.
-    TODO bonus (palier 5) : implémenter la vraie synthèse.
-    """
+    """Produce a summary of the whole corpus, still a placeholder"""
+
     return {
         "report": "Rapport factice en attendant l'implémentation.",
         "sources": [doc["id"] for doc in db.list_documents()],

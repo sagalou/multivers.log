@@ -1,8 +1,4 @@
-"""
-Multivers.log — Extraction de documents
-Palier 3 : transforme un fichier déposé en chunks exploitables, insérés en base.
-Un extracteur par format, tous convergent vers la même fonction chunk_and_store().
-"""
+"""Document extraction: turns an uploaded file into searchable chunks"""
 
 import re
 import uuid
@@ -16,19 +12,18 @@ from app import db
 
 
 def chunk_text(text: str, max_chars: int = 800) -> list[str]:
-    """
-    Découpe un texte en chunks d'environ max_chars caractères, en coupant
-    de préférence aux frontières de phrases pour ne pas tronquer au milieu
-    d'une idée (important pour que les citations restent lisibles).
-    """
+    """Split a text into chunks of about max_chars, cutting at sentence boundaries"""
+
     text = text.strip()
     if not text:
         return []
 
+    # Split after . ! or ? so a quote is never cut in the middle of an idea
     sentences = re.split(r"(?<=[.!?])\s+", text)
     chunks = []
     current = ""
 
+    # Fill the current chunk until the next sentence would make it too long
     for sentence in sentences:
         if len(current) + len(sentence) + 1 <= max_chars:
             current = f"{current} {sentence}".strip()
@@ -37,6 +32,7 @@ def chunk_text(text: str, max_chars: int = 800) -> list[str]:
                 chunks.append(current)
             current = sentence
 
+    # The loop leaves the last chunk unflushed
     if current:
         chunks.append(current)
 
@@ -44,14 +40,13 @@ def chunk_text(text: str, max_chars: int = 800) -> list[str]:
 
 
 def extract_pdf(file_path: str) -> list[dict]:
-    """
-    Extrait le texte d'un PDF page par page, découpe chaque page en chunks.
-    Retourne une liste de dicts {content, page_number, position} prêts à
-    être insérés via db.insert_chunk(), sans dépendre de son propre id.
-    """
+    """Extract a PDF page by page, keeping the page number for citations"""
+
     results = []
     with pdfplumber.open(file_path) as pdf:
+        # start=1 because readers count pages from one, not from zero
         for page_number, page in enumerate(pdf.pages, start=1):
+            # A page with only images returns None, not an empty string
             page_text = page.extract_text() or ""
             page_chunks = chunk_text(page_text)
             for position, chunk_content in enumerate(page_chunks):
@@ -66,21 +61,20 @@ def extract_pdf(file_path: str) -> list[dict]:
 
 
 def extract_csv(file_path: str) -> list[dict]:
-    """
-    Extrait un CSV ligne par ligne. Chaque ligne devient un chunk séparé
-    (pas de découpage par phrases ici, une ligne de tableur est déjà une
-    unité de sens : une facture, une mesure, une entrée). "page_number"
-    n'a pas de sens pour un CSV, on utilise "position" comme numéro de
-    ligne pour permettre malgré tout une citation précise.
-    """
+    """Extract a CSV row by row, one row being one unit of meaning"""
+
     df = pd.read_csv(file_path)
     results = []
+
+    # No sentence splitting here: a spreadsheet row is already self contained
     for position, row in df.iterrows():
+        # Keep the column names so the chunk stays readable out of context
         row_text = "; ".join(f"{col}: {val}" for col, val in row.items())
         if row_text.strip():
             results.append(
                 {
                     "content": row_text,
+                    # A CSV has no page, position carries the row number instead
                     "page_number": None,
                     "position": int(position),
                 }
@@ -89,12 +83,12 @@ def extract_csv(file_path: str) -> list[dict]:
 
 
 def extract_note(file_path: str) -> list[dict]:
-    """
-    Extrait une note texte brute (.txt, .md). Pas de notion de page,
-    juste un découpage en chunks comme pour un PDF.
-    """
+    """Extract a plain text note, same chunking as a PDF but without pages"""
+
+    # errors="replace" keeps a badly encoded file readable instead of crashing
     with open(file_path, "r", encoding="utf-8", errors="replace") as f:
         text = f.read()
+
     chunks = chunk_text(text)
     return [
         {"content": c, "page_number": None, "position": position}
@@ -103,24 +97,21 @@ def extract_note(file_path: str) -> list[dict]:
 
 
 def extract_image(file_path: str) -> list[dict]:
-    """
-    Extrait le texte d'une capture d'écran via OCR (Tesseract, local et
-    gratuit, cohérent avec le choix FTS5 plutôt qu'un service cloud).
-    Une image n'a qu'un seul passage indexable : contrairement à un PDF,
-    on ne peut pas surligner une portion précise dedans (limite connue,
-    documentée dans README.md).
-    Nécessite le pack de langue française de Tesseract installé sur la
-    machine (paquet système, pas pip) : voir README pour l'installation.
-    """
+    """Extract text from a screenshot through local OCR"""
+
+    # Tesseract runs locally and free, consistent with choosing FTS5 over a cloud service
     try:
         text = pytesseract.image_to_string(Image.open(file_path), lang="fra")
     except pytesseract.TesseractError as exc:
+        # The French language pack is a system package, pip cannot install it
         if "fra" in str(exc):
             raise RuntimeError(
                 "Pack de langue française Tesseract manquant sur cette machine "
                 "(sudo apt install tesseract-ocr-fra)."
             ) from exc
         raise
+
+    # An image yields a single indexable passage, no precise highlight inside it
     chunks = chunk_text(text)
     return [
         {"content": c, "page_number": None, "position": position}
@@ -128,6 +119,7 @@ def extract_image(file_path: str) -> list[dict]:
     ]
 
 
+# One extractor per extension, all returning the same chunk shape
 EXTRACTORS = {
     "pdf": extract_pdf,
     "csv": extract_csv,
@@ -140,14 +132,12 @@ EXTRACTORS = {
 
 
 def process_document(document_id: str, file_path: str, file_type: str) -> None:
-    """
-    Point d'entrée du pipeline d'extraction, appelé depuis /upload une fois
-    le fichier sauvegardé sur disque. Met à jour le statut du document
-    ("processed" ou "error") selon le résultat, jamais laissé en "processing".
-    """
+    """Run the right extractor and set the final document status"""
+
     extractor = EXTRACTORS.get(file_type)
 
     try:
+        # Unknown extension: fail explicitly rather than silently ignoring the file
         if extractor is None:
             db.update_document_status(
                 document_id, "error", f"Type de fichier non supporté pour l'instant : {file_type}"
@@ -156,12 +146,14 @@ def process_document(document_id: str, file_path: str, file_type: str) -> None:
 
         extracted = extractor(file_path)
 
+        # A readable file can still hold no text, a scanned PDF for instance
         if not extracted:
             db.update_document_status(
                 document_id, "error", "Aucun texte extrait (document vide ou illisible)."
             )
             return
 
+        # Each chunk gets its own id, the FTS5 index is filled by a trigger
         for chunk in extracted:
             chunk_id = f"c_{uuid.uuid4().hex[:8]}"
             db.insert_chunk(
@@ -175,7 +167,6 @@ def process_document(document_id: str, file_path: str, file_type: str) -> None:
         db.update_document_status(document_id, "processed")
 
     except Exception as exc:
-        # Ne jamais laisser un document bloqué en "processing" : un fichier
-        # corrompu ou illisible passe en erreur explicite, sans faire
-        # planter le reste de l'upload (voir cas d'échec géré dans SPEC.md).
+        # Never leave a document stuck on "processing": a corrupted file turns
+        # into an explicit error without breaking the rest of the upload
         db.update_document_status(document_id, "error", str(exc))

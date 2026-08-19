@@ -1,3 +1,4 @@
+/* Colour palette, defined once and reused everywhere */
 :root {
   --fond: #f5f6f8;
   --carte: #ffffff;
@@ -10,10 +11,12 @@
   --rouge: #b3261e;
 }
 
+/* Makes padding and border count inside the declared width */
 * {
   box-sizing: border-box;
 }
 
+/* Base typography and page background */
 body {
   margin: 0;
   background: var(--fond);
@@ -23,11 +26,13 @@ body {
   line-height: 1.5;
 }
 
+/* Titles keep their size from the components, not from the browser */
 h1,
 h2 {
   margin: 0;
 }
 
+/* Form controls inherit the page font instead of the system one */
 button,
 input {
   font: inherit;
