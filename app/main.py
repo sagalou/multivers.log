@@ -9,7 +9,7 @@ import uuid
 
 import google.generativeai as genai
 from dotenv import load_dotenv
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import db, extraction
@@ -17,7 +17,7 @@ from app import db, extraction
 load_dotenv()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "./data/uploads")
 
 if GEMINI_API_KEY:
@@ -79,6 +79,20 @@ async def upload_documents(files: list[UploadFile] = File(...)):
 def list_documents():
     """Liste les documents et leur statut, pour la vue liste du front."""
     return {"documents": db.list_documents()}
+
+
+@app.get("/chunks/{chunk_id}")
+def get_chunk(chunk_id: str):
+    """
+    Renvoie le passage complet d'un chunk, pour l'étape 5 du happy path
+    (clic sur une citation -> ouverture du passage source exact, surligné).
+    db.get_chunk() faisait déjà tout le travail côté base, il manquait
+    juste la route HTTP pour le rendre accessible depuis le front.
+    """
+    chunk = db.get_chunk(chunk_id)
+    if chunk is None:
+        raise HTTPException(status_code=404, detail=f"Chunk {chunk_id} introuvable.")
+    return chunk
 
 
 @app.post("/ask")
