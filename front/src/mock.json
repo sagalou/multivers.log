@@ -1,31 +1,105 @@
 {
   "documents": [
-    { "id": "doc_a1b2c3d4", "filename": "facture_janvier.pdf", "status": "processed", "error_message": null },
-    { "id": "doc_e5f6g7h8", "filename": "releve_mesures.csv", "status": "processed", "error_message": null },
-    { "id": "doc_i9j0k1l2", "filename": "notes_terrain.txt", "status": "processing", "error_message": null },
-    { "id": "doc_m3n4o5p6", "filename": "capture_plan.png", "status": "error", "error_message": "Image illisible, aucun texte detecte" }
+    {
+      "id": "doc_a1b2c3d4",
+      "filename": "facture_janvier.pdf",
+      "status": "processed",
+      "error_message": null
+    },
+    {
+      "id": "doc_e5f6g7h8",
+      "filename": "releve_mesures.csv",
+      "status": "processed",
+      "error_message": null
+    },
+    {
+      "id": "doc_i9j0k1l2",
+      "filename": "notes_terrain.txt",
+      "status": "processing",
+      "error_message": null
+    },
+    {
+      "id": "doc_m3n4o5p6",
+      "filename": "capture_plan.png",
+      "status": "error",
+      "error_message": "Image illisible, aucun texte detecte"
+    }
   ],
   "ask": {
-    "answer": "Le montant total facture est de 4 200 euros HT. Il apparait dans la facture de janvier, et le releve de mesures confirme la meme somme en ligne 14.",
+    "answer": "Le montant total facture est de 4 200 euros HT, regle par virement le 15 janvier. Le releve de mesures confirme la meme somme.\n\n« Montant total facture : 4 200 euros HT » [c_042]",
     "citations": [
       {
         "chunk_id": "c_042",
         "doc_id": "facture_janvier.pdf",
         "page": 7,
-        "char_start": 1580,
-        "char_end": 1745,
-        "quote": "4 200 euros HT",
-        "bbox": null
+        "quote": "Facture du 12 janvier. Montant total facture : 4 200 euros HT. Regle par virement le 15 janvier."
       },
       {
         "chunk_id": "c_118",
         "doc_id": "releve_mesures.csv",
         "page": null,
-        "char_start": 320,
-        "char_end": 361,
-        "quote": "total;4200;EUR;HT",
-        "bbox": null
+        "quote": "libelle: total facture; montant: 4200; devise: EUR; regime: HT"
       }
-    ]
-  }
+    ],
+    "trace": [
+      {
+        "tool": "list_corpus",
+        "args": {},
+        "status": "ok",
+        "duration_ms": 0.4
+      },
+      {
+        "tool": "search_documents",
+        "args": {
+          "query": "montant total"
+        },
+        "status": "error",
+        "duration_ms": 1.1,
+        "error": "base de donnees indisponible"
+      },
+      {
+        "tool": "search_documents",
+        "args": {
+          "query": "facture montant euros"
+        },
+        "status": "ok",
+        "duration_ms": 1.7
+      }
+    ],
+    "usage": {
+      "input_tokens": 918,
+      "output_tokens": 79,
+      "latency_ms": 4528.9
+    }
+  },
+  "chunks": {
+    "c_042": {
+      "id": "c_042",
+      "document_id": "doc_a1b2c3d4",
+      "filename": "facture_janvier.pdf",
+      "page_number": 7,
+      "position": 3,
+      "content": "CONDITIONS DE REGLEMENT\n\nFacture du 12 janvier. Montant total facture : 4 200 euros HT. Regle par virement le 15 janvier.\n\nUn escompte de 2 pour cent s'applique en cas de paiement sous huit jours. Passe ce delai, le montant reste du en totalite."
+    },
+    "c_118": {
+      "id": "c_118",
+      "document_id": "doc_e5f6g7h8",
+      "filename": "releve_mesures.csv",
+      "page_number": null,
+      "position": 14,
+      "content": "libelle: total facture; montant: 4200; devise: EUR; regime: HT"
+    }
+  },
+  "tools": [
+    {
+      "name": "search_documents",
+      "description": "Search the user's uploaded documents for passages relevant to a question. Use this whenever the question is about the content of the documents.",
+      "enabled": true
+    },
+    {
+      "name": "list_corpus",
+      "description": "List the documents currently uploaded and their processing status. Use this when the question is about the corpus itself rather than its content.",
+      "enabled": true
+    }
+  ]
 }

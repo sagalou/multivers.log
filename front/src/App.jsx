@@ -1,5 +1,13 @@
 import { useEffect, useState } from "react";
-import { askQuestion, isMockMode, listDocuments, uploadDocuments } from "./api";
+import {
+  askQuestion,
+  getChunk,
+  isMockMode,
+  listDocuments,
+  listTools,
+  setToolEnabled,
+  uploadDocuments,
+} from "./api";
 import "./App.css";
 
 // Maps the raw status sent by the back to the wording shown on screen
@@ -9,6 +17,11 @@ const STATUS_LABELS = {
   error: "erreur",
 };
 
+// Price per million tokens, editable in front/.env without touching the code
+// Check the current rates on ai.google.dev/pricing, they change with the model
+const PRICE_INPUT = Number(import.meta.env.VITE_PRICE_INPUT_PER_M || 0);
+const PRICE_OUTPUT = Number(import.meta.env.VITE_PRICE_OUTPUT_PER_M || 0);
+
 // Falls back to the raw value if the back ever sends an unknown status
 function statusLabel(status) {
   if (STATUS_LABELS[status]) {
@@ -17,8 +30,38 @@ function statusLabel(status) {
   return status;
 }
 
+// Reuses the document status colours for a tool call result
+function stepStatusClass(status) {
+  if (status === "ok") {
+    return "status status-processed";
+  }
+  return "status status-error";
+}
+
+// Class and wording of the on/off button, kept out of the markup
+function toggleClass(enabled) {
+  if (enabled) {
+    return "toggle toggle-on";
+  }
+  return "toggle toggle-off";
+}
+
+function toggleLabel(enabled) {
+  if (enabled) {
+    return "actif";
+  }
+  return "desactive";
+}
+
+// Turns a token count into an estimated price in dollars
+function estimateCost(usage) {
+  const input = (usage.input_tokens || 0) / 1000000;
+  const output = (usage.output_tokens || 0) / 1000000;
+  return input * PRICE_INPUT + output * PRICE_OUTPUT;
+}
+
 function App() {
-  // Everything the page displays lives in these seven states
+  // Everything the page displays lives in these states
   // Changing one of them makes React redraw the affected part of the page
   const [documents, setDocuments] = useState([]);
   const [question, setQuestion] = useState("");
@@ -27,6 +70,14 @@ function App() {
   const [uploading, setUploading] = useState(false);
   const [asking, setAsking] = useState(false);
   const [dragging, setDragging] = useState(false);
+
+  // Source passage opened by clicking a citation, null when nothing is open
+  const [passage, setPassage] = useState(null);
+  const [loadingPassage, setLoadingPassage] = useState("");
+
+  // Agent tools and their on/off state, mirrored from the server
+  const [tools, setTools] = useState([]);
+  const [togglingTool, setTogglingTool] = useState("");
 
   // Reloads the document list from the server, after an upload or on page load
   async function refreshDocuments() {
@@ -38,10 +89,36 @@ function App() {
     }
   }
 
+  // Reads which tools the agent may currently call
+  async function refreshTools() {
+    try {
+      const list = await listTools();
+      setTools(list);
+    } catch (failure) {
+      setError(`Liste des outils indisponible : ${failure.message}`);
+    }
+  }
+
   // Empty brackets mean: run this once, when the page opens
   useEffect(() => {
     refreshDocuments();
+    refreshTools();
   }, []);
+
+  // Switches a tool off to show the agent coping with a broken tool, or back on
+  async function handleToggleTool(tool) {
+    setError("");
+    setTogglingTool(tool.name);
+
+    try {
+      const list = await setToolEnabled(tool.name, !tool.enabled);
+      setTools(list);
+    } catch (failure) {
+      setError(`Impossible de changer l'etat de l'outil : ${failure.message}`);
+    } finally {
+      setTogglingTool("");
+    }
+  }
 
   // Handles both ways of picking files: the file dialog and the drop zone
   async function handleFiles(fileList) {
@@ -51,7 +128,6 @@ function App() {
       return;
     }
 
-    // Clear the previous error and lock the zone while the upload runs
     setError("");
     setUploading(true);
 
@@ -82,7 +158,7 @@ function App() {
     handleFiles(event.dataTransfer.files);
   }
 
-  // Sends the question, keeping the previous answer hidden while waiting
+  // Sends the question, clearing the previous answer and passage while waiting
   async function handleSubmit(event) {
     // Without this, the browser reloads the whole page on form submit
     event.preventDefault();
@@ -92,6 +168,7 @@ function App() {
 
     setError("");
     setAnswer(null);
+    setPassage(null);
     setAsking(true);
 
     try {
@@ -101,6 +178,29 @@ function App() {
       setError(`La question n'a pas abouti : ${failure.message}`);
     } finally {
       setAsking(false);
+    }
+  }
+
+  // Opens the full source passage behind a citation, step 5 of the happy path
+  async function handleOpenCitation(citation) {
+    // Clicking the open citation again closes it
+    if (passage && passage.id === citation.chunk_id) {
+      setPassage(null);
+      return;
+    }
+
+    setError("");
+    setLoadingPassage(citation.chunk_id);
+
+    try {
+      const chunk = await getChunk(citation.chunk_id);
+      // Keep the quote so the passage can be highlighted inside its context
+      setPassage({ ...chunk, quote: citation.quote });
+    } catch (failure) {
+      setError(`Passage source indisponible : ${failure.message}`);
+      setPassage(null);
+    } finally {
+      setLoadingPassage("");
     }
   }
 
@@ -183,6 +283,35 @@ function App() {
         )}
       </section>
 
+      {/* Tool switches: unplug one live to show the agent handling the failure */}
+      {tools.length > 0 && (
+        <section className="card">
+          <h2>Outils de l&apos;agent</h2>
+          <ul className="tools">
+            {tools.map((tool) => (
+              <li key={tool.name} className="tool">
+                <div className="tool-head">
+                  <span className="tool-name">{tool.name}</span>
+                  <button
+                    type="button"
+                    className={toggleClass(tool.enabled)}
+                    onClick={() => handleToggleTool(tool)}
+                    disabled={togglingTool === tool.name}
+                  >
+                    {toggleLabel(tool.enabled)}
+                  </button>
+                </div>
+                <p className="tool-description">{tool.description}</p>
+              </li>
+            ))}
+          </ul>
+          <p className="hint">
+            Un outil desactive reste annonce au modele. Il l&apos;appelle, recoit une
+            erreur, et doit dire qu&apos;il n&apos;a pas pu.
+          </p>
+        </section>
+      )}
+
       {/* Question form, disabled while a request is in flight or the field is empty */}
       <section className="card">
         <h2>Poser une question</h2>
@@ -213,19 +342,26 @@ function App() {
         {answer !== null && answer.answer && (
           <div>
             <p className="answer">{answer.answer}</p>
-            {/* Citations stay empty until search is wired into /ask */}
             {answer.citations.length === 0 && (
               <p className="hint">Aucune citation rattachee a cette reponse.</p>
             )}
             {answer.citations.length > 0 && (
               <ul className="citations">
                 {answer.citations.map((citation) => (
-                  <li key={citation.chunk_id} className="citation">
-                    <span className="quote">{citation.quote}</span>
-                    <span className="source">
-                      {citation.doc_id}
-                      {citation.page !== null && ` page ${citation.page}`}
-                    </span>
+                  <li key={citation.chunk_id}>
+                    {/* A button, not a div: keyboard and screen readers reach it */}
+                    <button
+                      type="button"
+                      className="citation"
+                      onClick={() => handleOpenCitation(citation)}
+                    >
+                      <span className="quote">{citation.quote}</span>
+                      <span className="source">
+                        {citation.doc_id}
+                        {citation.page !== null && ` page ${citation.page}`}
+                        {loadingPassage === citation.chunk_id && " · ouverture..."}
+                      </span>
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -233,6 +369,72 @@ function App() {
           </div>
         )}
       </section>
+
+      {/* Source passage, opened on demand so the user can check the citation himself */}
+      {passage !== null && (
+        <section className="card">
+          <h2>Passage source</h2>
+          <p className="passage-source">
+            {passage.filename}
+            {passage.page_number !== null && ` · page ${passage.page_number}`}
+            {` · ${passage.id}`}
+          </p>
+          <p className="passage-content">{passage.content}</p>
+        </section>
+      )}
+
+      {/* Tool trace, shown without any click: the checkpoint allows 30 seconds */}
+      {answer !== null && answer.trace && answer.trace.length > 0 && (
+        <section className="card">
+          <h2>Trace des outils ({answer.trace.length})</h2>
+          <ol className="trace">
+            {answer.trace.map((step, index) => (
+              <li key={index} className={`step step-${step.status}`}>
+                <span className="step-tool">{step.tool}</span>
+                <span className="step-args">{JSON.stringify(step.args)}</span>
+                <span className="step-time">{step.duration_ms} ms</span>
+                <span className={stepStatusClass(step.status)}>
+                  {step.status}
+                </span>
+                {step.error && <span className="reason">{step.error}</span>}
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+
+      {/* What the question actually cost, in tokens, money and time */}
+      {answer !== null && answer.usage && (
+        <section className="card">
+          <h2>Cout de cette requete</h2>
+          <ul className="metrics">
+            <li>
+              <span className="metric-value">{answer.usage.input_tokens ?? "-"}</span>
+              <span className="metric-label">tokens entree</span>
+            </li>
+            <li>
+              <span className="metric-value">{answer.usage.output_tokens ?? "-"}</span>
+              <span className="metric-label">tokens sortie</span>
+            </li>
+            <li>
+              <span className="metric-value">
+                {estimateCost(answer.usage).toFixed(6)} $
+              </span>
+              <span className="metric-label">cout estime</span>
+            </li>
+            <li>
+              <span className="metric-value">
+                {(answer.usage.latency_ms / 1000).toFixed(2)} s
+              </span>
+              <span className="metric-label">latence</span>
+            </li>
+          </ul>
+          <p className="hint">
+            Estimation basee sur {PRICE_INPUT} $ par million de tokens en entree et{" "}
+            {PRICE_OUTPUT} $ en sortie, reglables dans front/.env.
+          </p>
+        </section>
+      )}
     </div>
   );
 }

@@ -196,6 +196,26 @@ def _citations_from_trace(trace: list, answer_text: str) -> list:
     return citations
 
 
+@app.get("/tools")
+def list_tools():
+    """List the agent tools and whether each one is enabled, for the UI switches"""
+
+    return {"tools": tools.list_tool_states()}
+
+
+@app.post("/tools/{tool_name}")
+def toggle_tool(tool_name: str, payload: dict):
+    """Enable or disable one tool at runtime, without restarting the server"""
+
+    enabled = bool(payload.get("enabled", True))
+
+    # An unknown name is a client mistake, say so instead of failing silently
+    if not tools.set_tool_enabled(tool_name, enabled):
+        raise HTTPException(status_code=404, detail=f"Outil {tool_name} inconnu.")
+
+    return {"tools": tools.list_tool_states()}
+
+
 @app.post("/ask")
 async def ask_question(payload: dict):
     """Answer a question by letting the model call tools, never raising a 500"""

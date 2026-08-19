@@ -77,3 +77,54 @@ export async function askQuestion(question) {
   });
   return readJson(response);
 }
+
+// Fetches one full passage, used when the user clicks a citation
+export async function getChunk(chunkId) {
+  if (USE_MOCK) {
+    await pause(200);
+    const chunk = mockData.chunks[chunkId];
+    // Mirrors the 404 the real server sends for an unknown passage
+    if (!chunk) {
+      throw new Error(`passage ${chunkId} introuvable`);
+    }
+    return chunk;
+  }
+
+  const response = await fetch(`${API_URL}/chunks/${encodeURIComponent(chunkId)}`);
+  return readJson(response);
+}
+
+// Mock mode keeps the switch states here, the real ones live on the server
+const mockToolStates = mockData.tools.map((tool) => ({ ...tool }));
+
+// Lists the agent tools and tells which ones are currently enabled
+export async function listTools() {
+  if (USE_MOCK) {
+    await pause(150);
+    return mockToolStates.map((tool) => ({ ...tool }));
+  }
+
+  const response = await fetch(`${API_URL}/tools`);
+  const data = await readJson(response);
+  return data.tools;
+}
+
+// Switches one tool on or off, returning the full list back
+export async function setToolEnabled(name, enabled) {
+  if (USE_MOCK) {
+    await pause(150);
+    const tool = mockToolStates.find((item) => item.name === name);
+    if (tool) {
+      tool.enabled = enabled;
+    }
+    return mockToolStates.map((item) => ({ ...item }));
+  }
+
+  const response = await fetch(`${API_URL}/tools/${encodeURIComponent(name)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+  const data = await readJson(response);
+  return data.tools;
+}
