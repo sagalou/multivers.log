@@ -200,3 +200,34 @@ def search_chunks(query: str, k: int = 5) -> list[dict]:
         # Edge case FTS5 syntax error despite sanitizing: treat it as no result
         # rather than letting a 500 reach the client
         return []
+
+
+def delete_document(doc_id: str) -> bool:
+    """Delete a document and its chunks, return False if it does not exist"""
+
+    with get_connection() as conn:
+        existing = conn.execute(
+            "SELECT id FROM documents WHERE id = ?", (doc_id,)
+        ).fetchone()
+
+        if existing is None:
+            return False
+
+        # Chunks first: the foreign key constraint refuses to delete
+        # a document still referenced by chunks
+        conn.execute("DELETE FROM chunks WHERE document_id = ?", (doc_id,))
+        conn.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+
+        return True
+
+
+def delete_all_documents() -> int:
+    """Clear the whole corpus, return how many documents were removed"""
+
+    with get_connection() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+
+        conn.execute("DELETE FROM chunks")
+        conn.execute("DELETE FROM documents")
+
+        return count
