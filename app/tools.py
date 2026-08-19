@@ -61,9 +61,9 @@ def list_tool_states() -> list[dict]:
 
     return [
         {
-            "name": declaration["name"],
-            "description": declaration["description"],
-            "enabled": declaration["name"] not in DISABLED_TOOLS,
+            "name": declaration["function"]["name"],
+            "description": declaration["function"]["description"],
+            "enabled": declaration["function"]["name"] not in DISABLED_TOOLS,
         }
         for declaration in TOOL_DECLARATIONS
     ]
@@ -128,6 +128,47 @@ TOOL_DECLARATIONS = [
 ]
 
 
+def _coerce_args(name: str, args: dict) -> dict:
+    """Cast the arguments sent by the model to the types declared for the tool"""
+
+    declaration = next(
+        (d for d in TOOL_DECLARATIONS if d["function"]["name"] == name), None
+    )
+
+    if declaration is None:
+        return args
+
+    properties = declaration["function"].get("parameters", {}).get("properties", {})
+    coerced = {}
+
+    for key, value in args.items():
+        # An argument the tool never declared would raise a TypeError on call,
+        # dropping it lets the tool run with what it does understand
+        if key not in properties:
+            continue
+
+        expected = properties[key].get("type")
+
+        try:
+            if expected == "integer":
+                # float() first, so a model sending "2.0" for an integer still works
+                coerced[key] = int(float(value))
+            elif expected == "number":
+                coerced[key] = float(value)
+            elif expected == "boolean":
+                coerced[key] = str(value).strip().lower() in ("true", "1", "yes")
+            elif expected == "string":
+                coerced[key] = str(value)
+            else:
+                coerced[key] = value
+        except (TypeError, ValueError):
+            # Nonsense value such as "beaucoup" for a count: drop the argument so
+            # the tool falls back on its own default instead of failing outright
+            continue
+
+    return coerced
+
+
 def run_tool(name: str, args: dict) -> tuple[dict, dict]:
     """Run one tool by name, returning its result and a trace entry for the UI"""
 
@@ -162,8 +203,10 @@ def run_tool(name: str, args: dict) -> tuple[dict, dict]:
             },
         )
 
+    # The OpenAI-compatible API hands arguments over as decoded JSON with no type
+    # guarantee: a model may well send k as the string "5" instead of the number 5
     try:
-        result = function(**args)
+        result = function(**_coerce_args(name, args))
         status, error = "ok", None
     except Exception as exc:
         # A broken tool must not break the answer: the model is told it failed
