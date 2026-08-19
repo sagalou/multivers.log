@@ -5,19 +5,22 @@ import os
 import time
 import uuid
 
-import google.generativeai as genai
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from openai import OpenAI
 
 from app import db, extraction, tools
 
 # Must run before reading any variable below, it fills os.environ from .env
 load_dotenv()
 
-# Settings read once at startup, with defaults for everything but the API key
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+# Settings read once at startup, with defaults for everything but the API key.
+# NVIDIA NIM exposes an OpenAI-compatible endpoint: same client, different
+# base_url and key, no other code changes needed.
+NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
+NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "meta/llama-3.1-70b-instruct")
+NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "./data/uploads")
 
 # Stops the agent looping forever if the model keeps asking for tools
@@ -40,8 +43,7 @@ you succeeded.
 - Answer in the language of the question."""
 
 # Without a key the server still starts, only /ask reports it cannot answer
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
+client = OpenAI(base_url=NVIDIA_BASE_URL, api_key=NVIDIA_API_KEY) if NVIDIA_API_KEY else None
 
 app = FastAPI(title="Multivers.log API")
 
@@ -160,16 +162,25 @@ def _no_answer(message: str, trace: list | None = None) -> dict:
     }
 
 
-def _citations_from_trace(trace: list) -> list:
-    """Collect the passages the tools returned, so the front can link each source"""
+def _citations_from_trace(trace: list, answer_text: str) -> list:
+    """Collect only the passages actually quoted in the answer
+
+    search_documents can return passages the model looked at and discarded
+    (not relevant enough, or it decided the corpus has no answer). Citing all
+    of them would show sources for a claim that was never made. A passage
+    only becomes a citation if its text is found word for word in the answer.
+    """
 
     citations = []
     seen = set()
+    answer_text = answer_text or ""
 
     for entry in trace:
         for passage in entry.get("passages", []):
-            # The same passage can come back from two searches, cite it once
             if passage["chunk_id"] in seen:
+                continue
+
+            if passage["text"][:80] not in answer_text:
                 continue
 
             seen.add(passage["chunk_id"])
@@ -195,38 +206,39 @@ async def ask_question(payload: dict):
     if not question:
         return _no_answer("Question vide.")
 
-    if not GEMINI_API_KEY:
-        return _no_answer("GEMINI_API_KEY manquante côté serveur (voir .env).")
+    if client is None:
+        return _no_answer("NVIDIA_API_KEY manquante côté serveur (voir .env).")
 
     started = time.perf_counter()
     trace = []
 
-    try:
-        model = genai.GenerativeModel(
-            GEMINI_MODEL,
-            system_instruction=SYSTEM_PROMPT,
-            tools=[{"function_declarations": tools.TOOL_DECLARATIONS}],
-        )
-        chat = model.start_chat()
-        response = chat.send_message(question)
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": question},
+    ]
 
+    try:
         # The model decides which tool to call and when to stop, we only run what
         # it asks for and hand the result back until it answers in plain text
         for _ in range(MAX_AGENT_STEPS):
-            calls = [
-                part.function_call
-                for part in response.candidates[0].content.parts
-                if getattr(part, "function_call", None) and part.function_call.name
-            ]
+            response = client.chat.completions.create(
+                model=NVIDIA_MODEL,
+                messages=messages,
+                tools=tools.TOOL_DECLARATIONS,
+                tool_choice="auto",
+            )
+            message = response.choices[0].message
 
-            if not calls:
+            if not message.tool_calls:
                 break
 
-            replies = []
+            # The assistant's tool request must be replayed before the tool
+            # results, or the model loses track of what it asked for
+            messages.append(message.model_dump(exclude_unset=True))
 
-            for call in calls:
-                args = dict(call.args) if call.args else {}
-                result, entry = tools.run_tool(call.name, args)
+            for call in message.tool_calls:
+                args = json.loads(call.function.arguments or "{}")
+                result, entry = tools.run_tool(call.function.name, args)
 
                 # Passages travel with the trace so citations survive the loop
                 if isinstance(result, dict) and result.get("passages"):
@@ -234,36 +246,31 @@ async def ask_question(payload: dict):
 
                 trace.append(entry)
 
-                # Sent as a JSON string: the library chokes on nested lists of
-                # objects inside a function response
-                replies.append(
-                    genai.protos.Part(
-                        function_response=genai.protos.FunctionResponse(
-                            name=call.name,
-                            response={"result": json.dumps(result, ensure_ascii=False)},
-                        )
-                    )
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call.id,
+                        "content": json.dumps(result, ensure_ascii=False),
+                    }
                 )
 
-            response = chat.send_message(replies)
-
-        answer_text = response.text
+        answer_text = message.content
 
     except Exception as exc:
         # Refused key, exhausted quota, network cut during the demo: fall back to
         # the same no_answer shape instead of letting a raw 500 reach the front
         return _no_answer(f"Erreur lors de l'appel au LLM : {exc}", trace)
 
-    usage = getattr(response, "usage_metadata", None)
+    usage = getattr(response, "usage", None)
 
     return {
         "answer": answer_text,
-        "citations": _citations_from_trace(trace),
+        "citations": _citations_from_trace(trace, answer_text),
         "trace": trace,
         # Shown in the UI so the cost of a question is never invisible
         "usage": {
-            "input_tokens": getattr(usage, "prompt_token_count", None),
-            "output_tokens": getattr(usage, "candidates_token_count", None),
+            "input_tokens": getattr(usage, "prompt_tokens", None),
+            "output_tokens": getattr(usage, "completion_tokens", None),
             "latency_ms": round((time.perf_counter() - started) * 1000, 1),
         },
     }

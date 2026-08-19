@@ -56,37 +56,43 @@ TOOL_FUNCTIONS = {
 # not just what it does
 TOOL_DECLARATIONS = [
     {
-        "name": "search_documents",
-        "description": (
-            "Search the user's uploaded documents for passages relevant to a question. "
-            "Use this whenever the question is about the content of the documents: "
-            "figures, names, dates, facts, what a document says about a topic. "
-            "Returns passages with a chunk_id that must be used to cite the source."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Keywords to search for, drawn from the user's question",
+        "type": "function",
+        "function": {
+            "name": "search_documents",
+            "description": (
+                "Search the user's uploaded documents for passages relevant to a question. "
+                "Use this whenever the question is about the content of the documents: "
+                "figures, names, dates, facts, what a document says about a topic. "
+                "Returns passages with a chunk_id that must be used to cite the source."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Keywords to search for, drawn from the user's question",
+                    },
+                    "k": {
+                        "type": "integer",
+                        "description": "How many passages to return, 5 by default",
+                    },
                 },
-                "k": {
-                    "type": "integer",
-                    "description": "How many passages to return, 5 by default",
-                },
+                "required": ["query"],
             },
-            "required": ["query"],
         },
     },
     {
-        "name": "list_corpus",
-        "description": (
-            "List the documents currently uploaded and their processing status. "
-            "Use this when the question is about the corpus itself rather than its "
-            "content: how many documents there are, which files were uploaded, "
-            "whether a file failed to process. Does not read the documents."
-        ),
-        "parameters": {"type": "object", "properties": {}},
+        "type": "function",
+        "function": {
+            "name": "list_corpus",
+            "description": (
+                "List the documents currently uploaded and their processing status. "
+                "Use this when the question is about the corpus itself rather than its "
+                "content: how many documents there are, which files were uploaded, "
+                "whether a file failed to process. Does not read the documents."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
     },
 ]
 

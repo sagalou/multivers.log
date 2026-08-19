@@ -7,4 +7,4 @@ pdfplumber==0.11.4
 pandas==2.2.3
 pytesseract==0.3.13
 Pillow==11.0.0
-google-generativeai==0.8.3
+google-generativeai==0.8.3openai
