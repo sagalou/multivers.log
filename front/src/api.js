@@ -128,3 +128,19 @@ export async function setToolEnabled(name, enabled) {
   const data = await readJson(response);
   return data.tools;
 }
+
+// Asks for a written summary of the whole corpus, step 6 of the happy path
+// The server can take a long while here: it reads a sample of every document
+export async function generateReport() {
+  if (USE_MOCK) {
+    await pause(1200);
+    return mockData.report;
+  }
+
+  const response = await fetch(`${API_URL}/report`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query: "synthese du corpus" }),
+  });
+  return readJson(response);
+}

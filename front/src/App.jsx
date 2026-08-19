@@ -4,6 +4,7 @@ import {
   getChunk,
   isMockMode,
   listDocuments,
+  generateReport,
   listTools,
   setToolEnabled,
   uploadDocuments,
@@ -78,6 +79,10 @@ function App() {
   // Agent tools and their on/off state, mirrored from the server
   const [tools, setTools] = useState([]);
   const [togglingTool, setTogglingTool] = useState("");
+
+  // Corpus summary, built on demand because it reads every document
+  const [report, setReport] = useState(null);
+  const [buildingReport, setBuildingReport] = useState(false);
 
   // Reloads the document list from the server, after an upload or on page load
   async function refreshDocuments() {
@@ -204,6 +209,31 @@ function App() {
     }
   }
 
+  // Builds the whole-corpus summary, step 6 of the happy path
+  async function handleGenerateReport() {
+    setError("");
+    setReport(null);
+    setBuildingReport(true);
+
+    try {
+      const result = await generateReport();
+      setReport(result);
+    } catch (failure) {
+      setError(`Le rapport n'a pas pu etre genere : ${failure.message}`);
+    } finally {
+      setBuildingReport(false);
+    }
+  }
+
+  // Turns the document ids returned with the report into readable file names
+  function sourceLabel(docId) {
+    const match = documents.find((doc) => doc.id === docId);
+    if (match) {
+      return match.filename;
+    }
+    return docId;
+  }
+
   // Labels and classes computed before the display, to keep the markup readable
   let modeClass = "mode mode-live";
   let modeLabel = "Connecte au serveur";
@@ -220,6 +250,11 @@ function App() {
   let submitLabel = "Demander";
   if (asking) {
     submitLabel = "Recherche...";
+  }
+
+  let reportLabel = "Generer le rapport";
+  if (buildingReport) {
+    reportLabel = "Redaction en cours...";
   }
 
   return (
@@ -382,6 +417,37 @@ function App() {
           <p className="passage-content">{passage.content}</p>
         </section>
       )}
+
+      {/* Corpus summary on demand, the last step of the happy path */}
+      <section className="card">
+        <h2>Rapport de synthese</h2>
+        <button
+          type="button"
+          className="report-button"
+          onClick={handleGenerateReport}
+          disabled={buildingReport || documents.length === 0}
+        >
+          {reportLabel}
+        </button>
+        {documents.length === 0 && (
+          <p className="hint">Depose au moins un document pour generer un rapport.</p>
+        )}
+        {buildingReport && (
+          <p className="hint">
+            Le serveur lit un extrait de chaque document, cela peut prendre un moment.
+          </p>
+        )}
+        {report !== null && (
+          <div>
+            <p className="answer">{report.report}</p>
+            {report.sources.length > 0 && (
+              <p className="report-sources">
+                Etabli a partir de : {report.sources.map(sourceLabel).join(", ")}
+              </p>
+            )}
+          </div>
+        )}
+      </section>
 
       {/* Tool trace, shown without any click: the checkpoint allows 30 seconds */}
       {answer !== null && answer.trace && answer.trace.length > 0 && (

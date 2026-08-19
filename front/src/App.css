@@ -421,3 +421,26 @@
   background: #fbe6e5;
   color: var(--rouge);
 }
+
+/* Same shape as the question button, kept apart because it stands alone */
+.report-button {
+  padding: 11px 22px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #ffffff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.report-button:disabled {
+  background: #b8c2d9;
+  cursor: not-allowed;
+}
+
+/* Which documents the summary was built from, under the text */
+.report-sources {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: var(--texte-doux);
+}

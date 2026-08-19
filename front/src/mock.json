@@ -101,5 +101,13 @@
       "description": "List the documents currently uploaded and their processing status. Use this when the question is about the corpus itself rather than its content.",
       "enabled": true
     }
-  ]
+  ],
+  "report": {
+    "report": "Le corpus rassemble quatre documents de nature differente, deposes entre janvier et fevrier.\n\nSur le plan financier, la facture de janvier porte un montant total de 4 200 euros HT, regle par virement le 15 janvier. Le releve de mesures confirme ce montant sur sa ligne 14.\n\nLes notes de terrain sont encore en cours de traitement. La capture de plan n'a pas pu etre lue : aucun texte n'y a ete detecte.\n\nLe corpus permet donc de repondre aux questions financieres, mais reste incomplet sur la partie terrain.",
+    "sources": [
+      "doc_a1b2c3d4",
+      "doc_e5f6g7h8",
+      "doc_i9j0k1l2"
+    ]
+  }
 }
