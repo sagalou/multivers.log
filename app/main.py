@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import time
 import uuid
 
@@ -33,11 +34,16 @@ the user's own uploaded documents.
 Rules you must follow:
 - Answer only from what the tools return. Never use outside knowledge.
 - Every factual claim must come from a passage returned by search_documents.
-- When you cite, copy the sentence from the passage word for word. Never reword it.
-- Call search_documents once. If the passages do not answer the question, say so \
-instead of searching again with other words.
-- If the tools return nothing relevant, say you found no information in the corpus. \
-Do not guess, do not fill the gap.
+- Always include at least one direct quote from a passage, copied exactly, \
+character for character, wrapped in double quotes. Do not paraphrase the \
+quoted part. Example: passage says "Le budget alloué est de 4200 euros pour \
+le premier trimestre.", your answer must contain exactly that sentence in \
+quotes somewhere, even if you also explain it in your own words around it.
+- If your first search does not return anything relevant to the question, you may \
+search once more with different, broader keywords before concluding. Never search \
+more than twice for the same question.
+- If the tools still return nothing relevant after that, say you found no \
+information in the corpus. Do not guess, do not fill the gap.
 - If a tool reports an error, say you could not complete the search. Do not pretend \
 you succeeded.
 - Answer in the language of the question."""
@@ -168,7 +174,9 @@ def _citations_from_trace(trace: list, answer_text: str) -> list:
     search_documents can return passages the model looked at and discarded
     (not relevant enough, or it decided the corpus has no answer). Citing all
     of them would show sources for a claim that was never made. A passage
-    only becomes a citation if its text is found word for word in the answer.
+    only becomes a citation if at least one of its sentences is found word
+    for word in the answer: checking the whole passage at once was too
+    strict, the model usually quotes a single sentence out of several.
     """
 
     citations = []
@@ -180,7 +188,12 @@ def _citations_from_trace(trace: list, answer_text: str) -> list:
             if passage["chunk_id"] in seen:
                 continue
 
-            if passage["text"][:80] not in answer_text:
+            sentences = re.split(r"(?<=[.!?])\s+", passage["text"])
+            quoted = any(
+                len(s.strip()) > 15 and s.strip() in answer_text for s in sentences
+            )
+
+            if not quoted:
                 continue
 
             seen.add(passage["chunk_id"])
@@ -196,24 +209,57 @@ def _citations_from_trace(trace: list, answer_text: str) -> list:
     return citations
 
 
-@app.get("/tools")
-def list_tools():
-    """List the agent tools and whether each one is enabled, for the UI switches"""
+def _select_citations(answer_text: str, all_passages: list) -> list:
+    """Ask the model which passages support its answer, as a fallback
 
-    return {"tools": tools.list_tool_states()}
+    The prompt asks for a literal quote, but the model sometimes paraphrases
+    a data-like passage (a CSV row, for instance) into a natural sentence
+    instead of quoting it. When no exact quote is found, this second, small
+    request asks the model to point at the chunk_ids it actually used,
+    rather than leaving the answer with no citation at all.
+    """
 
+    if not all_passages:
+        return []
 
-@app.post("/tools/{tool_name}")
-def toggle_tool(tool_name: str, payload: dict):
-    """Enable or disable one tool at runtime, without restarting the server"""
+    catalog = "\n".join(f"- {p['chunk_id']}: {p['text']}" for p in all_passages)
 
-    enabled = bool(payload.get("enabled", True))
+    try:
+        response = client.chat.completions.create(
+            model=NVIDIA_MODEL,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Given an answer and a list of passages, return the ids of "
+                        "the passages that support the answer, as JSON only: "
+                        '{"chunk_ids": ["id1", "id2"]}. If none support it, return '
+                        '{"chunk_ids": []}. No text outside the JSON.'
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"Answer: {answer_text}\n\nPassages:\n{catalog}",
+                },
+            ],
+        )
+        picked = json.loads(response.choices[0].message.content)
+        picked_ids = set(picked.get("chunk_ids", []))
+    except Exception:
+        # A follow-up call is a nice-to-have: if it fails, the answer still
+        # stands, it is just shown without a clickable source this time
+        return []
 
-    # An unknown name is a client mistake, say so instead of failing silently
-    if not tools.set_tool_enabled(tool_name, enabled):
-        raise HTTPException(status_code=404, detail=f"Outil {tool_name} inconnu.")
-
-    return {"tools": tools.list_tool_states()}
+    return [
+        {
+            "chunk_id": p["chunk_id"],
+            "doc_id": p["document"],
+            "page": p["page"],
+            "quote": p["text"],
+        }
+        for p in all_passages
+        if p["chunk_id"] in picked_ids
+    ]
 
 
 @app.post("/ask")
@@ -282,10 +328,17 @@ async def ask_question(payload: dict):
         return _no_answer(f"Erreur lors de l'appel au LLM : {exc}", trace)
 
     usage = getattr(response, "usage", None)
+    citations = _citations_from_trace(trace, answer_text)
+
+    # Cheap match found nothing, but tools did return passages: ask the model
+    # directly rather than showing an answer with zero sources
+    if not citations:
+        all_passages = [p for entry in trace for p in entry.get("passages", [])]
+        citations = _select_citations(answer_text, all_passages)
 
     return {
         "answer": answer_text,
-        "citations": _citations_from_trace(trace, answer_text),
+        "citations": citations,
         "trace": trace,
         # Shown in the UI so the cost of a question is never invisible
         "usage": {
