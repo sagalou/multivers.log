@@ -77,3 +77,19 @@ export async function askQuestion(question) {
   });
   return readJson(response);
 }
+
+// Fetches one full passage, used when the user clicks a citation
+export async function getChunk(chunkId) {
+  if (USE_MOCK) {
+    await pause(200);
+    const chunk = mockData.chunks[chunkId];
+    // Mirrors the 404 the real server sends for an unknown passage
+    if (!chunk) {
+      throw new Error(`passage ${chunkId} introuvable`);
+    }
+    return chunk;
+  }
+
+  const response = await fetch(`${API_URL}/chunks/${encodeURIComponent(chunkId)}`);
+  return readJson(response);
+}

@@ -252,3 +252,112 @@
   background: #fdf0dd;
   color: var(--orange);
 }
+
+/* Citation turned into a button, so it stays reachable at the keyboard */
+.citations button.citation {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  border: 0;
+  border-left: 3px solid var(--accent);
+  background: #f7f9ff;
+  padding: 10px 14px;
+  border-radius: 0 8px 8px 0;
+}
+
+.citations button.citation:hover {
+  background: #eaf0ff;
+}
+
+/* Header line of the opened passage: file, page and chunk id */
+.passage-source {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--texte-doux);
+}
+
+/* pre-wrap keeps the line breaks of the original document */
+.passage-content {
+  margin: 0;
+  white-space: pre-wrap;
+  background: #f7f9ff;
+  border-left: 3px solid var(--accent);
+  padding: 12px 14px;
+  border-radius: 0 8px 8px 0;
+}
+
+/* Numbered list: the order of the calls is part of the information */
+.trace {
+  margin: 0;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border: 1px solid var(--bordure);
+  border-radius: 8px;
+}
+
+/* A failed call is outlined in red, spotted without reading the text */
+.step-error {
+  border-color: var(--rouge);
+}
+
+.step-tool {
+  font-weight: 600;
+}
+
+/* Arguments in monospace: it is raw data, not prose */
+.step-args {
+  flex: 1;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13px;
+  color: var(--texte-doux);
+  word-break: break-all;
+}
+
+.step-time {
+  font-size: 13px;
+  color: var(--texte-doux);
+}
+
+/* Four equal tiles, stacking on a narrow screen */
+.metrics {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.metrics li {
+  border: 1px solid var(--bordure);
+  border-radius: 8px;
+  padding: 12px;
+  text-align: center;
+}
+
+.metric-value {
+  display: block;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.metric-label {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--texte-doux);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
