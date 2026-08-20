@@ -96,6 +96,15 @@ sur `localhost:8000`, jamais directement au fournisseur du modèle.
 Attention au préfixe `VITE_` : Vite expose au navigateur toute variable qui le
 porte. Aucun secret ne doit jamais être préfixé ainsi.
 
+Vérifié : la clé n'apparaît ni dans `front/src/`, ni dans le paquet construit et
+livré au navigateur (`front/dist/`). Les seules variables qui y arrivent sont
+`VITE_USE_MOCK`, `VITE_API_URL`, `VITE_MAX_FILE_MB` et les deux tarifs
+d'affichage. Le front n'appelle aucun service externe, uniquement `localhost:8000`.
+
+L'injection de prompt est traitée côté serveur : le prompt système refuse de
+révéler ou de reformuler ses instructions, y compris si on lui affirme être en
+mode debug ou d'ignorer ce qui précède.
+
 ## Documentation
 
 - [`API_CONTRACT.md`](./API_CONTRACT.md) — contrat front/back, formats relevés sur le serveur réel
@@ -103,6 +112,22 @@ porte. Aucun secret ne doit jamais être préfixé ainsi.
 - [`SPEC.md`](./SPEC.md) — problème, user stories, hors-scope, choix assumés
 - [`REPARTITION.md`](./REPARTITION.md) — qui fait quoi, palier par palier
 - [`BACKEND_QUICKSTART.md`](./BACKEND_QUICKSTART.md) — détail back
+- [`eval/cases.md`](./eval/cases.md) — jeu d'évaluation de l'agent et score actuel
+
+## Évaluation et tests
+
+Cinq cas d'évaluation sont décrits dans [`eval/cases.md`](./eval/cases.md), avec
+pour chacun l'entrée, le résultat attendu et le résultat observé. Ils couvrent
+les comportements critiques : sourcer une réponse, refuser d'inventer hors
+corpus, agréger sur une question au pluriel, résister à une injection de prompt.
+
+Les tests automatisés portent sur la recherche, dont le bug du pluriel trouvé au
+palier 5 :
+
+```bash
+source venv/bin/activate
+pytest tests/ -v
+```
 
 ## Choix techniques
 
@@ -127,6 +152,9 @@ porte. Aucun secret ne doit jamais être préfixé ainsi.
 ## Limites connues
 
 - La recherche est sensible à la forme des mots : les pluriels sont traités, mais une faute de frappe ne trouvera rien. C'est la contrepartie assumée de FTS5 face à une recherche sémantique.
+- Pas de recherche entre langues : une question posée en français ne trouvera pas un passage écrit uniquement en russe ou en chinois, sauf sur des termes identiques comme des chiffres ou des noms propres. La recherche compare des mots, pas des sens.
+- Taille des fichiers limitée à 20 Mo. Au-delà, le document est refusé avec un message explicite, avant lecture en mémoire. La limite est appliquée deux fois : dans le navigateur pour répondre tout de suite, et sur le serveur qui reste la vraie garde.
+- L'OCR d'une capture d'écran introduit ses propres erreurs de lecture, qui se retrouvent dans l'index. Un mot mal reconnu ne sera pas retrouvé.
 - Pas de recherche sémantique en V1 : FTS5 travaille sur les mots, et peut manquer une réponse formulée très différemment du texte source.
 - Une capture d'écran donne un seul passage indexable, l'image entière via OCR. La citation ne peut pas y surligner une portion précise comme dans un PDF.
 - Pas de mise à jour incrémentale : déposer deux fois le même fichier crée deux documents distincts.
@@ -145,6 +173,8 @@ multivers.log/
 │   ├── src/App.jsx       la page unique
 │   ├── src/api.js        appels au back, bascule mock
 │   └── src/mock.json     données de démonstration
+├── eval/cases.md         jeu d'evaluation de l'agent
+├── tests/test_search.py  tests de non-regression sur la recherche
 ├── requirements.txt
 ├── .env.example
 └── *.md                  documentation (voir section Documentation)

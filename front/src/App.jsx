@@ -20,9 +20,10 @@ const STATUS_LABELS = {
   error: "erreur",
 };
 
-// Refused before upload: a huge file would be read into memory, written to
-// disk and parsed, all while the user waits with no idea why
-const MAX_FILE_MB = Number(import.meta.env.VITE_MAX_FILE_MB || 10);
+// Refused before upload, to spare the network and give an instant answer.
+// Must stay aligned with MAX_UPLOAD_SIZE_MB in app/main.py, which is the real
+// guard: this one lives in the browser, so it can be bypassed
+const MAX_FILE_MB = Number(import.meta.env.VITE_MAX_FILE_MB || 20);
 
 // Price per million tokens, editable in front/.env without touching the code
 // Check the current rates on ai.google.dev/pricing, they change with the model
@@ -37,9 +38,14 @@ function statusLabel(status) {
   return status;
 }
 
-// Shows a size the way a file manager does, not in raw bytes
+// Same megabyte as app/main.py, which counts 1 000 000 bytes and not 1 048 576.
+// Using the other convention here would let a 20.5 Mo file through, only for the
+// server to refuse it a second later
+const BYTES_PER_MB = 1_000_000;
+
+// Shows a size the way the server reports it, so both messages agree
 function readableSize(bytes) {
-  return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
+  return `${(bytes / BYTES_PER_MB).toFixed(1)} Mo`;
 }
 
 // Reuses the document status colours for a tool call result
@@ -148,7 +154,7 @@ function App() {
     }
 
     // Split rather than reject everything: the files within the limit still go
-    const limit = MAX_FILE_MB * 1024 * 1024;
+    const limit = MAX_FILE_MB * BYTES_PER_MB;
     const tooBig = files.filter((file) => file.size > limit);
     const accepted = files.filter((file) => file.size <= limit);
 
@@ -558,8 +564,14 @@ function App() {
             {answer.trace.map((step, index) => (
               <li key={index} className={`step step-${step.status}`}>
                 <span className="step-tool">{step.tool}</span>
-                <span className="step-args">{JSON.stringify(step.args)}</span>
-                <span className="step-time">{step.duration_ms} ms</span>
+                {/* Some entries carry no arguments and no timing, such as the
+                    citation picker reporting its own failure */}
+                <span className="step-args">
+                  {step.args && JSON.stringify(step.args)}
+                </span>
+                <span className="step-time">
+                  {step.duration_ms !== undefined && `${step.duration_ms} ms`}
+                </span>
                 <span className={stepStatusClass(step.status)}>
                   {step.status}
                 </span>
