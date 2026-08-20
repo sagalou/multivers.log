@@ -9,3 +9,4 @@ pytesseract==0.3.13
 Pillow==11.0.0
 openai==3.3.0
 pytest
+requests
