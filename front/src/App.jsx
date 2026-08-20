@@ -11,6 +11,7 @@ import {
   setToolEnabled,
   uploadDocuments,
 } from "./api";
+import { EVAL_CASES } from "./evalCases";
 import "./App.css";
 
 // Maps the raw status sent by the back to the wording shown on screen
@@ -46,6 +47,21 @@ const BYTES_PER_MB = 1_000_000;
 // Shows a size the way the server reports it, so both messages agree
 function readableSize(bytes) {
   return `${(bytes / BYTES_PER_MB).toFixed(1)} Mo`;
+}
+
+// Reuses the status colours for a passed or failed eval case
+function evalBadgeClass(passed) {
+  if (passed) {
+    return "status status-processed";
+  }
+  return "status status-error";
+}
+
+function evalBadgeLabel(passed) {
+  if (passed) {
+    return "PASS";
+  }
+  return "FAIL";
 }
 
 // Reuses the document status colours for a tool call result
@@ -103,6 +119,10 @@ function App() {
 
   // Id of the document being removed, empty when no deletion is running
   const [deleting, setDeleting] = useState("");
+
+  // One entry per eval case, filled as the run progresses
+  const [evalResults, setEvalResults] = useState([]);
+  const [running, setRunning] = useState(false);
 
   // Reloads the document list from the server, after an upload or on page load
   async function refreshDocuments() {
@@ -290,6 +310,40 @@ function App() {
     }
   }
 
+  // Replays the eval cases one by one, showing each result as it lands
+  // Sequential on purpose: firing five questions at once would hide which one
+  // is slow, and would hammer the model quota
+  async function handleRunEval() {
+    setError("");
+    setRunning(true);
+    setEvalResults([]);
+
+    const collected = [];
+
+    for (const testCase of EVAL_CASES) {
+      let entry;
+
+      try {
+        const answer = await askQuestion(testCase.question);
+        entry = { id: testCase.id, description: testCase.description, passed: testCase.check(answer) };
+      } catch (failure) {
+        // A failed call is a failed case, not a crashed page
+        entry = {
+          id: testCase.id,
+          description: testCase.description,
+          passed: false,
+          error: failure.message,
+        };
+      }
+
+      collected.push(entry);
+      // Copy the array so React sees a new value and redraws after each case
+      setEvalResults([...collected]);
+    }
+
+    setRunning(false);
+  }
+
   // Builds the whole-corpus summary, step 6 of the happy path
   async function handleGenerateReport() {
     setError("");
@@ -337,6 +391,13 @@ function App() {
   if (buildingReport) {
     reportLabel = "Redaction en cours...";
   }
+
+  let evalLabel = "Lancer l'evaluation";
+  if (running) {
+    evalLabel = `Cas ${evalResults.length + 1} sur ${EVAL_CASES.length}...`;
+  }
+
+  const passedCount = evalResults.filter((r) => r.passed).length;
 
   return (
     <div className="page">
@@ -524,6 +585,44 @@ function App() {
           <p className="passage-content">{passage.content}</p>
         </section>
       )}
+
+      {/* Eval run from the page, for demo comfort. The reference stays the
+          command line: make eval, which uses eval/run_eval.py */}
+      <section className="card">
+        <div className="card-head">
+          <h2>Evaluation de l&apos;agent</h2>
+          {evalResults.length === EVAL_CASES.length && !running && (
+            <span className="eval-score">
+              {passedCount} / {EVAL_CASES.length}
+            </span>
+          )}
+        </div>
+        <button
+          type="button"
+          className="report-button"
+          onClick={handleRunEval}
+          disabled={running}
+        >
+          {evalLabel}
+        </button>
+        {evalResults.length > 0 && (
+          <ul className="eval-list">
+            {evalResults.map((result) => (
+              <li key={result.id} className="eval-case">
+                <span className={evalBadgeClass(result.passed)}>
+                  {evalBadgeLabel(result.passed)}
+                </span>
+                <span className="eval-description">{result.description}</span>
+                {result.error && <span className="reason">{result.error}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="hint">
+          Chaque cas est une vraie question envoyee au serveur. Le resultat peut
+          varier d&apos;une execution a l&apos;autre.
+        </p>
+      </section>
 
       {/* Corpus summary on demand, the last step of the happy path */}
       <section className="card">

@@ -502,3 +502,33 @@
   opacity: 0.4;
   cursor: wait;
 }
+
+/* Score shown at the far end of the card title, once the run is over */
+.eval-score {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.eval-list {
+  list-style: none;
+  margin: 14px 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Verdict first, description after: the eye scans the badges in one pass */
+.eval-case {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border: 1px solid var(--bordure);
+  border-radius: 8px;
+}
+
+.eval-description {
+  flex: 1;
+}
