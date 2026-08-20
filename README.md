@@ -8,7 +8,7 @@ Projet réalisé dans le cadre du hackathon *Le System Prompt Perdu*, sujet ORAC
 
 ## Quickstart
 
-Prérequis : Python 3.12+, Node.js 18+, et une clé API Gemini gratuite. Sans clé,
+Prérequis : Python 3.12+, Node.js 18+, Tesseract, et une clé API NVIDIA gratuite. Sans clé,
 voir la section "Lancer sans clé API" juste en dessous : l'interface est
 consultable quand même.
 
@@ -24,6 +24,13 @@ cd multivers.log
 
 ### 2. Back (terminal 1)
 
+L'OCR des captures d'écran passe par Tesseract, un programme système que `pip`
+ne peut pas installer :
+
+```bash
+sudo apt install tesseract-ocr tesseract-ocr-fra
+```
+
 ```bash
 python3 -m venv venv
 source venv/bin/activate
@@ -31,8 +38,8 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Ouvrir `.env` et renseigner `GEMINI_API_KEY` avec votre clé, obtenue gratuitement
-sur [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
+Ouvrir `.env` et renseigner `NVIDIA_API_KEY` avec votre clé, obtenue gratuitement
+sur [build.nvidia.com](https://build.nvidia.com).
 
 ```bash
 uvicorn app.main:app --reload --port 8000
@@ -81,10 +88,10 @@ explicite plutôt qu'une erreur.
 
 ## Où sont les clés d'API
 
-La clé `GEMINI_API_KEY` vit uniquement dans le fichier `.env` du **back**, jamais
+La clé `NVIDIA_API_KEY` vit uniquement dans le fichier `.env` du **back**, jamais
 exposée côté front, jamais commitée (voir `.gitignore`, qui couvre `.env`,
 `*.env`, `.env.local` et `.env.*.local`). Le front ne parle qu'à notre propre API
-sur `localhost:8000`, jamais directement à Gemini.
+sur `localhost:8000`, jamais directement au fournisseur du modèle.
 
 Attention au préfixe `VITE_` : Vite expose au navigateur toute variable qui le
 porte. Aucun secret ne doit jamais être préfixé ainsi.
@@ -101,7 +108,7 @@ porte. Aucun secret ne doit jamais être préfixé ainsi.
 
 - **SQLite + FTS5** pour le stockage et la recherche plein texte, plutôt qu'une base vectorielle. Gratuit, zéro dépendance externe, zéro appel API supplémentaire pour indexer.
 - **Tesseract (OCR local)** pour extraire le texte des captures d'écran, gratuit et local, cohérent avec le choix FTS5.
-- **Gemini 3.6 Flash** comme LLM, clé API personnelle en offre gratuite, pas de coût pour le hackathon.
+- **NVIDIA NIM** comme fournisseur de modèle, via son API compatible OpenAI. Changer de modèle, ou même de fournisseur, ne demande que trois lignes dans le `.env`.
 - **FastAPI** pour le back, **React + Vite** pour le front, sans librairie d'interface.
 - **Vérification des citations** : avant affichage, le `chunk_id` cité doit exister en base et la citation doit se retrouver dans le texte du passage. Voir `app/verification.py`.
 - **Pas d'authentification** : usage local mono-utilisateur pour ce hackathon.
@@ -110,16 +117,16 @@ porte. Aucun secret ne doit jamais être préfixé ainsi.
 
 | Palier | Statut |
 |---|---|
-| 1 · Cadrage | fait — SPEC.md, ARCHITECTURE.md, REPARTITION.md |
-| 2 · Socle | fait — back et front démarrent, appel Gemini réel affiché à l'écran |
-| 3 · Premier outil | en cours — extraction et SQLite/FTS5 branchés, OCR à finir |
-| 4 · MVP | à faire — brancher `search_chunks` dans `/ask`, citations vérifiées |
-| 5 · Durcissement | à faire |
+| 1 · Cadrage | validé — SPEC.md, ARCHITECTURE.md, REPARTITION.md |
+| 2 · Socle | validé — back et front démarrent, appel LLM réel affiché à l'écran |
+| 3 · Premier outil | validé — deux outils appelés par l'agent, trace visible, erreurs gérées |
+| 4 · MVP | validé — parcours complet dans le navigateur, citations cliquables, rapport |
+| 5 · Durcissement | en cours — délais maximum, limites de taille, jeu d'évaluation |
 | 6 · Livraison | à faire — AGENTS.md, JOURNAL.md, répétition démo |
 
 ## Limites connues
 
-- `/ask` interroge le LLM sans contexte issu du corpus : la recherche documentaire est branchée en base mais pas encore dans la boucle de réponse. Les réponses ne citent donc aucune source pour l'instant.
+- La recherche est sensible à la forme des mots : les pluriels sont traités, mais une faute de frappe ne trouvera rien. C'est la contrepartie assumée de FTS5 face à une recherche sémantique.
 - Pas de recherche sémantique en V1 : FTS5 travaille sur les mots, et peut manquer une réponse formulée très différemment du texte source.
 - Une capture d'écran donne un seul passage indexable, l'image entière via OCR. La citation ne peut pas y surligner une portion précise comme dans un PDF.
 - Pas de mise à jour incrémentale : déposer deux fois le même fichier crée deux documents distincts.

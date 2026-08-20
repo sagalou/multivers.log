@@ -20,6 +20,10 @@ const STATUS_LABELS = {
   error: "erreur",
 };
 
+// Refused before upload: a huge file would be read into memory, written to
+// disk and parsed, all while the user waits with no idea why
+const MAX_FILE_MB = Number(import.meta.env.VITE_MAX_FILE_MB || 10);
+
 // Price per million tokens, editable in front/.env without touching the code
 // Check the current rates on ai.google.dev/pricing, they change with the model
 const PRICE_INPUT = Number(import.meta.env.VITE_PRICE_INPUT_PER_M || 0);
@@ -31,6 +35,11 @@ function statusLabel(status) {
     return STATUS_LABELS[status];
   }
   return status;
+}
+
+// Shows a size the way a file manager does, not in raw bytes
+function readableSize(bytes) {
+  return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
 }
 
 // Reuses the document status colours for a tool call result
@@ -138,11 +147,30 @@ function App() {
       return;
     }
 
-    setError("");
+    // Split rather than reject everything: the files within the limit still go
+    const limit = MAX_FILE_MB * 1024 * 1024;
+    const tooBig = files.filter((file) => file.size > limit);
+    const accepted = files.filter((file) => file.size <= limit);
+
+    if (tooBig.length > 0) {
+      const names = tooBig
+        .map((file) => `${file.name} (${readableSize(file.size)})`)
+        .join(", ");
+      setError(
+        `Fichier trop volumineux, la limite est de ${MAX_FILE_MB} Mo : ${names}`,
+      );
+    } else {
+      setError("");
+    }
+
+    if (accepted.length === 0) {
+      return;
+    }
+
     setUploading(true);
 
     try {
-      await uploadDocuments(files);
+      await uploadDocuments(accepted);
       await refreshDocuments();
     } catch (failure) {
       setError(`Le depot a echoue : ${failure.message}`);
@@ -336,7 +364,9 @@ function App() {
           />
           <strong>Glisse tes fichiers ici</strong>
           <span>ou clique pour les choisir</span>
-          <small>PDF, CSV, notes, captures d&apos;ecran</small>
+          <small>
+            PDF, CSV, notes, captures d&apos;ecran &middot; {MAX_FILE_MB} Mo maximum
+          </small>
         </label>
         {uploading && <p className="hint">Envoi en cours...</p>}
       </section>

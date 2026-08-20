@@ -6,6 +6,13 @@ import mockData from "./mock.json";
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === "true";
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
+// A request that never ends looks exactly like a broken app, so every call has
+// a deadline. Reads are quick, a question waits for the model, a report reads
+// every document and needs the most room
+const TIMEOUT_READ = 15000;
+const TIMEOUT_ASK = 90000;
+const TIMEOUT_REPORT = 180000;
+
 // Lets the page show which mode it is running in
 export function isMockMode() {
   return USE_MOCK;
@@ -16,11 +23,35 @@ function pause(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-// Turns any failed request into a readable error instead of a silent undefined
-async function readJson(response) {
+// Wraps fetch with a deadline, and tells a timeout apart from an unreachable
+// server: the user needs different advice in each case
+async function request(path, options, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  let response;
+
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      ...options,
+      signal: controller.signal,
+    });
+  } catch (failure) {
+    if (failure.name === "AbortError") {
+      throw new Error(
+        `le serveur n'a pas repondu en ${Math.round(timeoutMs / 1000)} s`,
+      );
+    }
+    throw new Error("serveur injoignable, verifie qu'il est bien lance");
+  } finally {
+    // Always clear the timer, even when the request succeeded
+    clearTimeout(timer);
+  }
+
   if (!response.ok) {
     throw new Error(`le serveur a repondu ${response.status}`);
   }
+
   return response.json();
 }
 
@@ -41,12 +72,8 @@ export async function uploadDocuments(files) {
   const form = new FormData();
   files.forEach((file) => form.append("files", file));
 
-  // Send them, then keep only the documents list from the answer
-  const response = await fetch(`${API_URL}/upload`, {
-    method: "POST",
-    body: form,
-  });
-  const data = await readJson(response);
+  // Extraction runs during the upload, so it needs the long deadline
+  const data = await request("/upload", { method: "POST", body: form }, TIMEOUT_ASK);
   return data.documents;
 }
 
@@ -57,8 +84,7 @@ export async function listDocuments() {
     return mockData.documents;
   }
 
-  const response = await fetch(`${API_URL}/documents`);
-  const data = await readJson(response);
+  const data = await request("/documents", {}, TIMEOUT_READ);
   return data.documents;
 }
 
@@ -70,12 +96,15 @@ export async function askQuestion(question) {
     return mockData.ask;
   }
 
-  const response = await fetch(`${API_URL}/ask`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question }),
-  });
-  return readJson(response);
+  return request(
+    "/ask",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question }),
+    },
+    TIMEOUT_ASK,
+  );
 }
 
 // Fetches one full passage, used when the user clicks a citation
@@ -90,8 +119,7 @@ export async function getChunk(chunkId) {
     return chunk;
   }
 
-  const response = await fetch(`${API_URL}/chunks/${encodeURIComponent(chunkId)}`);
-  return readJson(response);
+  return request(`/chunks/${encodeURIComponent(chunkId)}`, {}, TIMEOUT_READ);
 }
 
 // Mock mode keeps the switch states here, the real ones live on the server
@@ -104,8 +132,7 @@ export async function listTools() {
     return mockToolStates.map((tool) => ({ ...tool }));
   }
 
-  const response = await fetch(`${API_URL}/tools`);
-  const data = await readJson(response);
+  const data = await request("/tools", {}, TIMEOUT_READ);
   return data.tools;
 }
 
@@ -120,29 +147,35 @@ export async function setToolEnabled(name, enabled) {
     return mockToolStates.map((item) => ({ ...item }));
   }
 
-  const response = await fetch(`${API_URL}/tools/${encodeURIComponent(name)}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ enabled }),
-  });
-  const data = await readJson(response);
+  const data = await request(
+    `/tools/${encodeURIComponent(name)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    },
+    TIMEOUT_READ,
+  );
   return data.tools;
 }
 
 // Asks for a written summary of the whole corpus, step 6 of the happy path
-// The server can take a long while here: it reads a sample of every document
+// The server reads a sample of every document, so this one is the slowest
 export async function generateReport() {
   if (USE_MOCK) {
     await pause(1200);
     return mockData.report;
   }
 
-  const response = await fetch(`${API_URL}/report`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query: "synthese du corpus" }),
-  });
-  return readJson(response);
+  return request(
+    "/report",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: "synthese du corpus" }),
+    },
+    TIMEOUT_REPORT,
+  );
 }
 
 // Removes one document, its passages and its file on disk
@@ -152,10 +185,7 @@ export async function deleteDocument(docId) {
     return { deleted: docId };
   }
 
-  const response = await fetch(`${API_URL}/documents/${encodeURIComponent(docId)}`, {
-    method: "DELETE",
-  });
-  return readJson(response);
+  return request(`/documents/${encodeURIComponent(docId)}`, { method: "DELETE" }, TIMEOUT_READ);
 }
 
 // Empties the whole corpus, to start a demo from a clean list
@@ -165,6 +195,5 @@ export async function deleteAllDocuments() {
     return { deleted_count: mockData.documents.length };
   }
 
-  const response = await fetch(`${API_URL}/documents`, { method: "DELETE" });
-  return readJson(response);
+  return request("/documents", { method: "DELETE" }, TIMEOUT_READ);
 }
