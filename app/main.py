@@ -39,6 +39,9 @@ character for character, wrapped in double quotes. Do not paraphrase the \
 quoted part. Example: passage says "Le budget alloué est de 4200 euros pour \
 le premier trimestre.", your answer must contain exactly that sentence in \
 quotes somewhere, even if you also explain it in your own words around it.
+- If the question asks about a set (all, every, how many, list), address every \
+distinct item the tool returned, not just the first one. Include a direct quote \
+for each one you mention.
 - If your first search does not return anything relevant to the question, you may \
 search once more with different, broader keywords before concluding. Never search \
 more than twice for the same question.

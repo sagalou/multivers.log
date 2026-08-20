@@ -166,9 +166,14 @@ def _sanitize_fts5_query(raw_query: str) -> str:
     if not words:
         return ""
 
-    # Double quotes make each word literal, so AND OR NOT stay plain words
+    # FTS5 matches whole tokens: "factures" never matches an indexed
+    # "facture". Stripping a naive plural ending and searching as a
+    # prefix makes both forms match the same tokens either way.
+    stems = [w[:-1] if w[-1] in "sx" and len(w) > 3 else w for w in words]
+
+    # Double quotes make each stem literal, * turns it into a prefix search,
     # OR between them widens the search instead of requiring every word
-    return " OR ".join(f'"{w}"' for w in words)
+    return " OR ".join(f'"{s}"*' for s in stems)
 
 
 def search_chunks(query: str, k: int = 5) -> list[dict]:
