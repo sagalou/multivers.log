@@ -6,6 +6,11 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
+# Below this length, a word carries no meaning of its own once searched as a
+# prefix. Measured on the corpus: 3 removes the false positives without losing
+# the plural fix, 4 starts dropping real results.
+MIN_SEARCH_WORD_LENGTH = 3
+
 
 def _database_path() -> str:
     """Read the database path on every call, never once at import time"""
@@ -163,6 +168,14 @@ def _sanitize_fts5_query(raw_query: str) -> str:
     # FTS5 has its own syntax: quotes, parentheses, AND OR NOT, -, *, column
     # filters with ':'. A raw French question would raise a syntax error
     words = re.findall(r"\w+", raw_query, flags=re.UNICODE)
+    if not words:
+        return ""
+
+    # Prefix search turns very short words into nets that catch everything:
+    # the "d" of "d'un" matches de, des, du, documentation... and drags the
+    # whole corpus back for a question it has nothing to do with. Digits are
+    # kept whatever their length, a year or an invoice number is meaningful.
+    words = [w for w in words if len(w) >= MIN_SEARCH_WORD_LENGTH or w.isdigit()]
     if not words:
         return ""
 

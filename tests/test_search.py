@@ -63,10 +63,41 @@ def test_empty_query_returns_empty_string():
 def test_short_words_are_not_stemmed():
     """Stripping a trailing s/x must not butcher a word down to nothing
 
-    A naive stemmer applied to every word would turn "les" into "le" and
-    "as" into "a", degrading search quality for common short words. The
-    length guard (> 3 chars) exists specifically to avoid that.
+    A naive stemmer applied to every word would turn "les" into "le",
+    degrading search quality for common short words. The length guard
+    (> 3 chars) exists specifically to avoid that.
     """
 
     assert _sanitize_fts5_query("les") == '"les"*'
-    assert _sanitize_fts5_query("as") == '"as"*'
+
+def test_very_short_words_are_dropped():
+    """Words under 3 letters are removed, they would match the whole corpus
+
+    Searched as a prefix, the "d" of "d'un" matches de, des, du,
+    documentation... and drags every document back for a question that has
+    nothing to do with them. Observed on a real query: "donne moi la recette
+    d'un sandwich" returned 7 passages, none of them about a sandwich.
+    """
+
+    assert _sanitize_fts5_query("d") == ""
+    assert _sanitize_fts5_query("as") == ""
+
+
+def test_digits_survive_the_length_filter():
+    """A short number is meaningful, unlike a short word
+
+    An invoice number or a year must stay searchable even with two digits.
+    """
+
+    assert _sanitize_fts5_query("facture 42") == '"facture"* OR "42"*'
+
+
+def test_real_query_no_longer_matches_everything():
+    """Regression on the false positive found during the palier 5 chaos run"""
+
+    query = _sanitize_fts5_query("donne moi la recette d'un sandwich")
+    assert '"recette"*' in query
+    assert '"sandwich"*' in query
+    # The stop words that used to drag the whole corpus back are gone
+    for bruit in ('"la"*', '"un"*', '"d"*'):
+        assert bruit not in query
