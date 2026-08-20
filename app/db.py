@@ -201,11 +201,14 @@ def search_chunks(query: str, k: int = 5) -> list[dict]:
                 (safe_query, k),
             ).fetchall()
             return [dict(row) for row in rows]
-    except sqlite3.OperationalError:
-        # Edge case FTS5 syntax error despite sanitizing: treat it as no result
-        # rather than letting a 500 reach the client
-        return []
-
+    except sqlite3.OperationalError as exc:
+        # Returning [] here is indistinguishable from "the corpus has
+        # nothing relevant": the agent would confidently say so, which is
+        # false, the search never actually ran. Raise instead: run_tool()
+        # in tools.py already catches exceptions and puts them in the
+        # trace with status "error", so the agent is told the search
+        # failed rather than silently told there was nothing to find.
+        raise RuntimeError(f"Recherche indisponible : {exc}") from exc
 
 def delete_document(doc_id: str) -> bool:
     """Delete a document and its chunks, return False if it does not exist"""
