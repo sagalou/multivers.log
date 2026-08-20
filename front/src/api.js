@@ -144,3 +144,27 @@ export async function generateReport() {
   });
   return readJson(response);
 }
+
+// Removes one document, its passages and its file on disk
+export async function deleteDocument(docId) {
+  if (USE_MOCK) {
+    await pause(200);
+    return { deleted: docId };
+  }
+
+  const response = await fetch(`${API_URL}/documents/${encodeURIComponent(docId)}`, {
+    method: "DELETE",
+  });
+  return readJson(response);
+}
+
+// Empties the whole corpus, to start a demo from a clean list
+export async function deleteAllDocuments() {
+  if (USE_MOCK) {
+    await pause(300);
+    return { deleted_count: mockData.documents.length };
+  }
+
+  const response = await fetch(`${API_URL}/documents`, { method: "DELETE" });
+  return readJson(response);
+}

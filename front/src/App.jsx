@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import {
   askQuestion,
+  deleteAllDocuments,
+  deleteDocument,
+  generateReport,
   getChunk,
   isMockMode,
   listDocuments,
-  generateReport,
   listTools,
   setToolEnabled,
   uploadDocuments,
@@ -83,6 +85,9 @@ function App() {
   // Corpus summary, built on demand because it reads every document
   const [report, setReport] = useState(null);
   const [buildingReport, setBuildingReport] = useState(false);
+
+  // Id of the document being removed, empty when no deletion is running
+  const [deleting, setDeleting] = useState("");
 
   // Reloads the document list from the server, after an upload or on page load
   async function refreshDocuments() {
@@ -209,6 +214,48 @@ function App() {
     }
   }
 
+  // Removes a single document, then reloads the list from the server
+  async function handleDeleteDocument(doc) {
+    setError("");
+    setDeleting(doc.id);
+
+    try {
+      await deleteDocument(doc.id);
+      await refreshDocuments();
+    } catch (failure) {
+      setError(`Suppression impossible : ${failure.message}`);
+    } finally {
+      setDeleting("");
+    }
+  }
+
+  // Empties the corpus, asking first because nothing can be undone
+  async function handleDeleteAll() {
+    const confirmed = window.confirm(
+      `Supprimer les ${documents.length} documents ? Cette action est definitive.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setError("");
+    setDeleting("all");
+
+    try {
+      await deleteAllDocuments();
+      await refreshDocuments();
+      // The answer and the report described a corpus that no longer exists
+      setAnswer(null);
+      setPassage(null);
+      setReport(null);
+    } catch (failure) {
+      setError(`Suppression impossible : ${failure.message}`);
+    } finally {
+      setDeleting("");
+    }
+  }
+
   // Builds the whole-corpus summary, step 6 of the happy path
   async function handleGenerateReport() {
     setError("");
@@ -296,7 +343,20 @@ function App() {
 
       {/* Document list with its status badge, empty until something is uploaded */}
       <section className="card">
-        <h2>Documents ({documents.length})</h2>
+        {/* Title on the left, clear-all on the right, the two ends of the same line */}
+        <div className="card-head">
+          <h2>Documents ({documents.length})</h2>
+          {documents.length > 0 && (
+            <button
+              type="button"
+              className="clear-all"
+              onClick={handleDeleteAll}
+              disabled={deleting !== ""}
+            >
+              Supprimer tout
+            </button>
+          )}
+        </div>
         {documents.length === 0 && (
           <p className="hint">Aucun document depose pour le moment.</p>
         )}
@@ -309,6 +369,17 @@ function App() {
                 <span className={`status status-${doc.status}`}>
                   {statusLabel(doc.status)}
                 </span>
+                {/* aria-label names the action, the cross alone says nothing aloud */}
+                <button
+                  type="button"
+                  className="remove"
+                  onClick={() => handleDeleteDocument(doc)}
+                  disabled={deleting !== ""}
+                  title={`Supprimer ${doc.filename}`}
+                  aria-label={`Supprimer ${doc.filename}`}
+                >
+                  &times;
+                </button>
                 {doc.error_message && (
                   <span className="reason">{doc.error_message}</span>
                 )}

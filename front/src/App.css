@@ -444,3 +444,61 @@
   font-size: 13px;
   color: var(--texte-doux);
 }
+
+/* Card title on one side, its action on the other */
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+/* The title already carries its own bottom margin inside a plain card */
+.card-head h2 {
+  margin-bottom: 0;
+}
+
+/* Discreet until hovered: destructive, so it should not invite a stray click */
+.clear-all {
+  border: 1px solid var(--bordure);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--texte-doux);
+  padding: 5px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.clear-all:hover:not(:disabled) {
+  border-color: var(--rouge);
+  color: var(--rouge);
+  background: #fbe6e5;
+}
+
+.clear-all:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+/* Cross at the end of each row, grey until the row is hovered */
+.remove {
+  border: 0;
+  background: transparent;
+  color: var(--texte-doux);
+  font-size: 22px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.remove:hover:not(:disabled) {
+  color: var(--rouge);
+  background: #fbe6e5;
+}
+
+.remove:disabled {
+  opacity: 0.4;
+  cursor: wait;
+}
